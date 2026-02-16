@@ -1,0 +1,5 @@
+export const MAX_MESSAGES_PER_USER = 30;
+export const MAX_MESSAGES_TOTAL = 60;
+export const COORDINATION_WINDOW_MINUTES = 15;
+export const OFFER_RESPONSE_SECONDS = 120;
+export const LOCATION_EXPIRY_MINUTES = 30;

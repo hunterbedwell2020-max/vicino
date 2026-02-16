@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "Vicino",
+    "slug": "vicino",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#5B2A86"
+    },
+    "ios": {
+      "supportsTablet": false
+    },
+    "android": {},
+    "web": {},
+    "plugins": [
+      "expo-asset"
+    ]
+  }
+}
