@@ -183,10 +183,10 @@ export async function registerAuthUser(input: {
   try {
     const { rows } = await pool.query(
       `INSERT INTO users (
-      id, first_name, last_name, username, password_hash, email, age, gender,
+        id, first_name, last_name, username, password_hash, email, age, gender,
         bio, verified, verification_status, photos, hobbies, max_distance_miles
       )
-      VALUES ($1, $2, $3, $4, $5, 18, 'other', '', FALSE, 'unsubmitted', '[]'::jsonb, ARRAY[]::text[], 25)
+      VALUES ($1, $2, $3, $4, $5, $6, 18, 'other', '', FALSE, 'unsubmitted', '[]'::jsonb, ARRAY[]::text[], 25)
       RETURNING id, first_name, last_name, username, is_admin, email, phone, age, gender, preferred_gender, likes, dislikes,
                 bio, verified, photos, hobbies, prompt_one, prompt_two, max_distance_miles`,
       [userId, username, "", username, passwordHash, input.email.trim().toLowerCase()]
