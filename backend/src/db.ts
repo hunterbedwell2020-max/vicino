@@ -1,8 +1,14 @@
 import { Pool } from "pg";
 import { randomBytes, scryptSync } from "node:crypto";
 
+const databaseUrl = process.env.DATABASE_URL?.trim();
+if (process.env.RAILWAY_SERVICE_ID && (!databaseUrl || databaseUrl.length === 0)) {
+  throw new Error("DATABASE_URL is missing or empty in Railway service variables.");
+}
 const connectionString =
-  process.env.DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/vicino";
+  databaseUrl && databaseUrl.length > 0
+    ? databaseUrl
+    : "postgresql://postgres:postgres@localhost:5432/vicino";
 
 export const pool = new Pool({ connectionString });
 
