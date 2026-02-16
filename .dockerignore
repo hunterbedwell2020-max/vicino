@@ -1,0 +1,7 @@
+.git
+node_modules
+mobile
+Vicino
+backend/node_modules
+backend/dist
+*.log
