@@ -15,7 +15,13 @@
     "android": {},
     "web": {},
     "plugins": [
-      "expo-asset"
+      "expo-asset",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Vicino uses your location to show nearby profiles and meetups."
+        }
+      ]
     ]
   }
 }

@@ -1,7 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect, useState } from "react";
-import { SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, View } from "react-native";
-import { getAuthSession, postLogout, type ApiUser, type VerificationStatus } from "./src/api";
+import { AppState, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, View } from "react-native";
+import * as Location from "expo-location";
+import { getAuthSession, postLogout, postUserLocation, type ApiUser, type VerificationStatus } from "./src/api";
 import { TabBar } from "./src/components/TabBar";
 import { AdminScreen } from "./src/screens/AdminScreen";
 import { ActiveMatchesScreen } from "./src/screens/ActiveMatchesScreen";
@@ -13,6 +14,7 @@ import { useVicinoState } from "./src/state/appState";
 import { theme } from "./src/theme";
 
 const AUTH_TOKEN_KEY = "vicino_auth_token";
+const LOCATION_SYNC_MS = 3 * 60 * 1000;
 
 export default function App() {
   const [booting, setBooting] = useState(true);
@@ -60,6 +62,58 @@ export default function App() {
       state.setTab("swipe");
     }
   }, [user?.isAdmin, state.tab, state.setTab]);
+
+  useEffect(() => {
+    if (!activeUserId) {
+      return;
+    }
+
+    let disposed = false;
+    let syncInFlight = false;
+
+    const syncLocation = async (promptIfNeeded: boolean) => {
+      if (disposed || syncInFlight) {
+        return;
+      }
+
+      syncInFlight = true;
+      try {
+        let permission = await Location.getForegroundPermissionsAsync();
+        if (!permission.granted && promptIfNeeded) {
+          permission = await Location.requestForegroundPermissionsAsync();
+        }
+        if (!permission.granted) {
+          return;
+        }
+
+        const current = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced
+        });
+        await postUserLocation(activeUserId, current.coords.latitude, current.coords.longitude);
+      } catch {
+        // Non-blocking: location update failures should not break app usage.
+      } finally {
+        syncInFlight = false;
+      }
+    };
+
+    void syncLocation(true);
+    const interval = setInterval(() => {
+      void syncLocation(false);
+    }, LOCATION_SYNC_MS);
+
+    const sub = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        void syncLocation(false);
+      }
+    });
+
+    return () => {
+      disposed = true;
+      clearInterval(interval);
+      sub.remove();
+    };
+  }, [activeUserId]);
 
   const signIn = async (token: string, nextUser: ApiUser, nextVerification: VerificationStatus) => {
     await AsyncStorage.setItem(AUTH_TOKEN_KEY, token);

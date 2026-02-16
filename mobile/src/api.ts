@@ -161,6 +161,14 @@ export interface UploadImageResponse {
   url: string;
 }
 
+export interface UserLocationResponse {
+  id: string;
+  firstName: string;
+  latitude: number;
+  longitude: number;
+  lastLocationAt: string;
+}
+
 export function getUsers() {
   return request<ApiUser[]>("/users");
 }
@@ -225,6 +233,13 @@ export function postDistancePreference(userId: string, maxDistanceMiles: number)
       body: JSON.stringify({ maxDistanceMiles })
     }
   );
+}
+
+export function postUserLocation(userId: string, latitude: number, longitude: number) {
+  return request<UserLocationResponse>(`/users/${userId}/location`, {
+    method: "POST",
+    body: JSON.stringify({ latitude, longitude })
+  });
 }
 
 export function postUserProfile(

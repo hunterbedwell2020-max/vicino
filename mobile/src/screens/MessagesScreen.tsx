@@ -1,8 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FlatList,
   Image,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -39,6 +41,7 @@ export function MessagesScreen({
 }) {
   const [compose, setCompose] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const listRef = useRef<FlatList<{ id: string; sender: "me" | "them"; body: string }>>(null);
 
   const capReached = activeMatch ? messageCapReached(activeMatch) : false;
 
@@ -147,6 +150,16 @@ export function MessagesScreen({
     closeChat();
   };
 
+  useEffect(() => {
+    if (!activeMatch) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      listRef.current?.scrollToEnd({ animated: false });
+    }, 10);
+    return () => clearTimeout(timer);
+  }, [activeMatch?.id, activeMatch?.chat.length]);
+
   if (!activeMatch) {
     return (
       <FlatList
@@ -201,7 +214,11 @@ export function MessagesScreen({
   };
 
   return (
-    <View style={styles.chatWrap}>
+    <KeyboardAvoidingView
+      style={styles.chatWrap}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 88 : 0}
+    >
       <View style={styles.chatHeader}>
         <Pressable onPress={closeChatWithGuard}>
           <Text style={styles.back}>{"< Back"}</Text>
@@ -224,10 +241,13 @@ export function MessagesScreen({
       </View>
 
       <FlatList
+        ref={listRef}
         data={activeMatch.chat}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.chatList}
         style={styles.chatListSurface}
+        keyboardShouldPersistTaps="handled"
+        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
         renderItem={({ item }) => (
           <View style={[styles.bubble, item.sender === "me" ? styles.myBubble : styles.theirBubble]}>
             <Text style={[styles.bubbleText, item.sender === "me" && styles.myBubbleText]}>{item.body}</Text>
@@ -260,7 +280,7 @@ export function MessagesScreen({
       )}
 
       {decisionModal}
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -340,7 +360,8 @@ const styles = StyleSheet.create({
   chatListSurface: {
     backgroundColor: theme.colors.card,
     borderRadius: theme.radius.md,
-    maxHeight: 320
+    flex: 1,
+    minHeight: 0
   },
   chatList: {
     padding: 12,
@@ -390,7 +411,8 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.card,
     borderRadius: theme.radius.md,
     padding: 12,
-    gap: 8
+    gap: 8,
+    marginBottom: 4
   },
   input: {
     backgroundColor: "#F2ECF8",
