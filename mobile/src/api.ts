@@ -1,17 +1,36 @@
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
+function parseErrorMessage(payload: unknown, status: number) {
+  if (typeof payload === "string" && payload.trim().length > 0) {
+    return payload;
+  }
+  if (payload && typeof payload === "object") {
+    const obj = payload as Record<string, unknown>;
+    if (typeof obj.error === "string") {
+      return obj.error;
+    }
+    if (obj.error && typeof obj.error === "object") {
+      return JSON.stringify(obj.error);
+    }
+    return JSON.stringify(obj);
+  }
+  return `Request failed: ${status}`;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...((init?.headers as Record<string, string> | undefined) ?? {})
+  };
+
   const res = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {})
-    },
-    ...init
+    ...init,
+    headers
   });
 
   if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error ?? `Request failed: ${res.status}`);
+    const data = await res.json().catch(() => null);
+    throw new Error(parseErrorMessage(data, res.status));
   }
 
   return (await res.json()) as T;
