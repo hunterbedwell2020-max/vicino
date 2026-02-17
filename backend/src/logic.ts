@@ -1,6 +1,7 @@
 import { pool } from "./db.js";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { createAccessToken, createRefreshToken, verifyAccessToken } from "./authToken.js";
+import { registerUserPushToken, sendPushToUsers } from "./push.js";
 import {
   COORDINATION_WINDOW_MINUTES,
   LOCATION_EXPIRY_MINUTES,
@@ -251,6 +252,16 @@ export async function listUsers() {
      ORDER BY id`
   );
   return rows.map(mapUser);
+}
+
+export async function registerPushTokenForUser(
+  userId: string,
+  expoPushToken: string,
+  platform: string
+) {
+  await getUserAny(userId);
+  await registerUserPushToken(userId, expoPushToken, platform);
+  return { ok: true as const };
 }
 
 export async function registerAuthUser(input: {
@@ -1020,7 +1031,7 @@ export async function swipe(fromUserId: string, toUserId: string, decision: Swip
     await client.query("COMMIT");
 
     const row = inserted.rows[0];
-    return {
+    const result = {
       matched: true,
       match: {
         id: row.id,
@@ -1033,6 +1044,29 @@ export async function swipe(fromUserId: string, toUserId: string, decision: Swip
         meetDecisionByUser: {}
       }
     };
+    void (async () => {
+      const usersRes = await pool.query(
+        `SELECT id, first_name
+         FROM users
+         WHERE id = ANY($1::text[])`,
+        [[fromUserId, toUserId]]
+      );
+      const firstNameById = Object.fromEntries(
+        usersRes.rows.map((r) => [String(r.id), String(r.first_name)])
+      ) as Record<string, string>;
+
+      await sendPushToUsers([fromUserId], {
+        title: "New Match",
+        body: `You matched with ${firstNameById[toUserId] ?? "someone"}!`,
+        data: { type: "match", matchId: row.id, otherUserId: toUserId }
+      });
+      await sendPushToUsers([toUserId], {
+        title: "New Match",
+        body: `You matched with ${firstNameById[fromUserId] ?? "someone"}!`,
+        data: { type: "match", matchId: row.id, otherUserId: fromUserId }
+      });
+    })().catch(() => null);
+    return result;
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
@@ -1101,7 +1135,7 @@ export async function sendMessage(matchId: string, senderUserId: string, body: s
     const newSenderCount = senderCount + 1;
     const newTotal = total + 1;
 
-    return {
+    const result = {
       message: {
         id: inserted.rows[0].id,
         matchId: inserted.rows[0].match_id,
@@ -1113,6 +1147,18 @@ export async function sendMessage(matchId: string, senderUserId: string, body: s
       remainingTotal: MAX_MESSAGES_TOTAL - newTotal,
       needsMeetDecision: newTotal >= MAX_MESSAGES_TOTAL
     };
+    const recipientUserId =
+      match.user_a_id === senderUserId ? match.user_b_id : match.user_a_id;
+    void (async () => {
+      const senderRes = await pool.query(`SELECT first_name FROM users WHERE id = $1`, [senderUserId]);
+      const senderName = senderRes.rows[0]?.first_name ? String(senderRes.rows[0].first_name) : "Someone";
+      await sendPushToUsers([recipientUserId], {
+        title: `New message from ${senderName}`,
+        body: body.trim().slice(0, 120),
+        data: { type: "message", matchId, senderUserId }
+      });
+    })().catch(() => null);
+    return result;
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
@@ -1377,7 +1423,7 @@ export async function createMeetupOffer(
     await client.query("COMMIT");
 
     const row = rows[0];
-    return {
+    const result = {
       id: row.id,
       sessionId: row.session_id,
       initiatorUserId: row.initiator_user_id,
@@ -1389,6 +1435,16 @@ export async function createMeetupOffer(
       locationExpiresAt: row.location_expires_at,
       status: row.status
     };
+    void (async () => {
+      const initiatorRes = await pool.query(`SELECT first_name FROM users WHERE id = $1`, [initiatorUserId]);
+      const initiatorName = initiatorRes.rows[0]?.first_name ? String(initiatorRes.rows[0].first_name) : "Someone";
+      await sendPushToUsers([recipientUserId], {
+        title: "Meetup Offer",
+        body: `${initiatorName} sent a meetup location: ${placeLabel}`,
+        data: { type: "offer", sessionId, offerId: row.id }
+      });
+    })().catch(() => null);
+    return result;
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;

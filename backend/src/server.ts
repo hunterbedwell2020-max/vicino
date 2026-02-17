@@ -25,6 +25,7 @@ import {
   loginAuthUser,
   logoutAuthSession,
   refreshAuthSession,
+  registerPushTokenForUser,
   registerAuthUser,
   reviewVerificationSubmission,
   respondAvailabilityInterest,
@@ -385,6 +386,28 @@ app.post("/users/:userId/location", async (req, res) => {
 
   try {
     const row = await updateUserLocation(req.params.userId, parsed.data.latitude, parsed.data.longitude);
+    return res.json(row);
+  } catch (err) {
+    return res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/users/:userId/push-token", async (req, res) => {
+  const schema = z.object({
+    expoPushToken: z.string().min(1),
+    platform: z.string().optional().default("unknown")
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+
+  try {
+    const row = await registerPushTokenForUser(
+      String(req.params.userId),
+      parsed.data.expoPushToken,
+      parsed.data.platform
+    );
     return res.json(row);
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });

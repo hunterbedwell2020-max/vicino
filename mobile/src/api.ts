@@ -261,6 +261,13 @@ export function postUserLocation(userId: string, latitude: number, longitude: nu
   });
 }
 
+export function postUserPushToken(userId: string, expoPushToken: string, platform: string) {
+  return request<{ ok: boolean }>(`/users/${userId}/push-token`, {
+    method: "POST",
+    body: JSON.stringify({ expoPushToken, platform })
+  });
+}
+
 export function postUserProfile(
   userId: string,
   payload: {

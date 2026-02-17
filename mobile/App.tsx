@@ -4,6 +4,7 @@ import {
   AppState,
   Image,
   Modal,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -13,7 +14,14 @@ import {
   View
 } from "react-native";
 import * as Location from "expo-location";
-import { getAuthSession, postLogout, postUserLocation, type ApiUser, type VerificationStatus } from "./src/api";
+import {
+  getAuthSession,
+  postLogout,
+  postUserLocation,
+  postUserPushToken,
+  type ApiUser,
+  type VerificationStatus
+} from "./src/api";
 import { TabBar } from "./src/components/TabBar";
 import { ProfilePreviewModal } from "./src/components/ProfilePreviewModal";
 import { AdminScreen } from "./src/screens/AdminScreen";
@@ -37,6 +45,7 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [previewProfile, setPreviewProfile] = useState<ProfileCard | null>(null);
+  const [lastPushToken, setLastPushToken] = useState<string | null>(null);
 
   const canAccessApp = Boolean(user && (user.isAdmin || verification?.status === "approved"));
   const activeUserId = canAccessApp && user ? user.id : null;
@@ -138,6 +147,71 @@ export default function App() {
       sub.remove();
     };
   }, [activeUserId]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setLastPushToken(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const registerPushToken = async () => {
+      try {
+        let NotificationsModule: unknown;
+        try {
+          NotificationsModule = require("expo-notifications");
+        } catch {
+          return;
+        }
+
+        const Notifications = NotificationsModule as {
+          setNotificationHandler?: (handler: unknown) => void;
+          getPermissionsAsync: () => Promise<{ status: string }>;
+          requestPermissionsAsync: () => Promise<{ status: string }>;
+          getExpoPushTokenAsync: () => Promise<{ data: string }>;
+        };
+
+        Notifications.setNotificationHandler?.({
+          handleNotification: async () => ({
+            shouldShowAlert: true,
+            shouldPlaySound: false,
+            shouldSetBadge: false
+          })
+        });
+
+        let permission = await Notifications.getPermissionsAsync();
+        if (permission.status !== "granted") {
+          permission = await Notifications.requestPermissionsAsync();
+        }
+        if (permission.status !== "granted") {
+          return;
+        }
+
+        const tokenData = await Notifications.getExpoPushTokenAsync();
+        const expoPushToken = tokenData?.data?.trim();
+        if (!expoPushToken || cancelled) {
+          return;
+        }
+        if (expoPushToken === lastPushToken) {
+          return;
+        }
+
+        await postUserPushToken(user.id, expoPushToken, Platform.OS);
+        if (!cancelled) {
+          setLastPushToken(expoPushToken);
+        }
+      } catch {
+        // Non-blocking: push token registration should not affect normal app usage.
+      }
+    };
+
+    void registerPushToken();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, lastPushToken]);
 
   const signIn = async (token: string, nextUser: ApiUser, nextVerification: VerificationStatus) => {
     await AsyncStorage.setItem(AUTH_TOKEN_KEY, token);

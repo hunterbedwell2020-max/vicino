@@ -327,6 +327,16 @@ export async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS user_push_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      expo_push_token TEXT NOT NULL UNIQUE,
+      platform TEXT NOT NULL DEFAULT 'unknown',
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE INDEX IF NOT EXISTS idx_matches_pair ON matches (user_a_id, user_b_id);
     CREATE INDEX IF NOT EXISTS idx_matches_user_a_created ON matches (user_a_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_matches_user_b_created ON matches (user_b_id, created_at DESC);
@@ -344,6 +354,7 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_auth_refresh_sessions_expires ON auth_refresh_sessions (expires_at);
     CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_created ON admin_audit_logs (created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_target ON admin_audit_logs (target_user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_user_push_tokens_user_active ON user_push_tokens (user_id, active, last_seen_at DESC);
   `);
 
   await pool.query(`
