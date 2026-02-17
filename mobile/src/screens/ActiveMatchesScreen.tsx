@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import type { MatchPreview, OutTonightState } from "../types";
 import { theme } from "../theme";
 
@@ -25,6 +25,7 @@ const fmtCountdown = (targetTs: number | null) => {
 
 export function ActiveMatchesScreen({
   matches,
+  openMatchProfile,
   bothMeetYes,
   messageCapReached,
   outTonight,
@@ -38,6 +39,7 @@ export function ActiveMatchesScreen({
   syncMeetupTimers
 }: {
   matches: MatchPreview[];
+  openMatchProfile: (matchId: string) => void;
   bothMeetYes: (match: MatchPreview) => boolean;
   messageCapReached: (match: MatchPreview) => boolean;
   outTonight: OutTonightState;
@@ -110,6 +112,17 @@ export function ActiveMatchesScreen({
             ) : (
               outTonight.candidates.map((candidate) => (
                 <View key={candidate.matchId} style={styles.candidateRow}>
+                  <Pressable onPress={() => openMatchProfile(candidate.matchId)}>
+                    {candidate.photos && candidate.photos[0] ? (
+                      <Image source={{ uri: candidate.photos[0] }} style={styles.candidateAvatar} />
+                    ) : (
+                      <View style={styles.candidateAvatarFallback}>
+                        <Text style={styles.candidateAvatarFallbackText}>
+                          {candidate.name.slice(0, 1).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                  </Pressable>
                   <Text style={styles.candidateName}>{candidate.name}</Text>
                   <Text style={styles.candidateStatus}>{candidate.response.toUpperCase()}</Text>
                   <Pressable
@@ -186,7 +199,20 @@ export function ActiveMatchesScreen({
         const capped = messageCapReached(match);
         return (
           <View key={match.id} style={styles.card}>
-            <Text style={styles.name}>{match.name}</Text>
+            <View style={styles.matchHeaderRow}>
+              <Pressable onPress={() => openMatchProfile(match.id)}>
+                {match.avatarUrl ? (
+                  <Image source={{ uri: match.avatarUrl }} style={styles.matchAvatar} />
+                ) : (
+                  <View style={styles.matchAvatarFallback}>
+                    <Text style={styles.matchAvatarFallbackText}>
+                      {match.name.slice(0, 1).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+              <Text style={styles.name}>{match.name}</Text>
+            </View>
             <Text style={styles.detail}>
               {capped
                 ? "60-message cap complete. Decision prompt is now active in the DM thread."
@@ -269,6 +295,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8
   },
+  candidateAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18
+  },
+  candidateAvatarFallback: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#EDE7F6",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  candidateAvatarFallbackText: {
+    color: theme.colors.primary,
+    fontWeight: "800"
+  },
   candidateName: { flex: 1, color: theme.colors.text, fontWeight: "700" },
   candidateStatus: { color: theme.colors.primary, fontWeight: "700", fontSize: 12 },
   pickBtn: {
@@ -303,6 +346,28 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.md,
     padding: 14,
     gap: 6
+  },
+  matchHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10
+  },
+  matchAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20
+  },
+  matchAvatarFallback: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#EDE7F6",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  matchAvatarFallbackText: {
+    color: theme.colors.primary,
+    fontWeight: "800"
   },
   name: { fontSize: 18, fontWeight: "700", color: theme.colors.text },
   detail: { color: theme.colors.muted }

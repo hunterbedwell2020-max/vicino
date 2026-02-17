@@ -15,6 +15,7 @@ import {
 import * as Location from "expo-location";
 import { getAuthSession, postLogout, postUserLocation, type ApiUser, type VerificationStatus } from "./src/api";
 import { TabBar } from "./src/components/TabBar";
+import { ProfilePreviewModal } from "./src/components/ProfilePreviewModal";
 import { AdminScreen } from "./src/screens/AdminScreen";
 import { ActiveMatchesScreen } from "./src/screens/ActiveMatchesScreen";
 import { MessagesScreen } from "./src/screens/MessagesScreen";
@@ -23,6 +24,7 @@ import { ProfileScreen } from "./src/screens/ProfileScreen";
 import { SwipeScreen } from "./src/screens/SwipeScreen";
 import { useVicinoState } from "./src/state/appState";
 import { theme } from "./src/theme";
+import type { ProfileCard } from "./src/types";
 
 const AUTH_TOKEN_KEY = "vicino_auth_token";
 const LOCATION_SYNC_MS = 3 * 60 * 1000;
@@ -34,6 +36,7 @@ export default function App() {
   const [verification, setVerification] = useState<VerificationStatus | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [previewProfile, setPreviewProfile] = useState<ProfileCard | null>(null);
 
   const canAccessApp = Boolean(user && (user.isAdmin || verification?.status === "approved"));
   const activeUserId = canAccessApp && user ? user.id : null;
@@ -154,6 +157,13 @@ export default function App() {
     setVerification(null);
   };
 
+  const openProfilePreviewForMatch = (matchId: string) => {
+    const profile = state.getProfileCardByMatchId(matchId);
+    if (profile) {
+      setPreviewProfile(profile);
+    }
+  };
+
   const locked = !canAccessApp;
 
   return (
@@ -217,6 +227,7 @@ export default function App() {
                 <MessagesScreen
                   matches={state.matches}
                   activeMatch={state.activeChatMatch}
+                  openMatchProfile={openProfilePreviewForMatch}
                   openChat={state.openChat}
                   closeChat={state.closeChat}
                   sendMessage={state.sendMessage}
@@ -231,6 +242,7 @@ export default function App() {
                 <ScrollView contentContainerStyle={styles.scrollWrap}>
                   <ActiveMatchesScreen
                     matches={state.matches}
+                    openMatchProfile={openProfilePreviewForMatch}
                     bothMeetYes={state.bothMeetYes}
                     messageCapReached={state.messageCapReached}
                     outTonight={state.outTonight}
@@ -254,6 +266,11 @@ export default function App() {
             </>
           )}
         </View>
+        <ProfilePreviewModal
+          visible={Boolean(previewProfile)}
+          profile={previewProfile}
+          onClose={() => setPreviewProfile(null)}
+        />
 
         {!locked ? (
           <View style={styles.footer}>

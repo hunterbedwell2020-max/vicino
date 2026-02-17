@@ -289,6 +289,9 @@ export function SwipeScreen({
         {...panResponder.panHandlers}
       >
         <Image source={{ uri: card.photos[photoIndex] ?? card.photos[0] }} style={styles.photo} />
+        <Pressable style={styles.profileThumbBtn} onPress={openProfile}>
+          <Image source={{ uri: card.photos[0] ?? card.photos[photoIndex] }} style={styles.profileThumbImage} />
+        </Pressable>
         <View style={styles.photoProgressWrap}>
           {card.photos.map((photo, index) => (
             <View
@@ -395,6 +398,22 @@ const styles = StyleSheet.create({
     zIndex: 15,
     flexDirection: "row",
     gap: 6
+  },
+  profileThumbBtn: {
+    position: "absolute",
+    right: 14,
+    bottom: CARD_PHOTO_HEIGHT - 52,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 2,
+    borderColor: "#fff",
+    overflow: "hidden",
+    zIndex: 25
+  },
+  profileThumbImage: {
+    width: "100%",
+    height: "100%"
   },
   photoProgressSegment: {
     flex: 1,

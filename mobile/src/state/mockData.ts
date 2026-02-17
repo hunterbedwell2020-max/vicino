@@ -42,6 +42,7 @@ export const swipeDeckSeed: ProfileCard[] = [
 export const matchSeed: MatchPreview[] = [
   {
     id: "m1",
+    otherUserId: "u2",
     name: "Sam",
     avatarUrl: "https://picsum.photos/200/200?41",
     messagesUsedByMe: 2,
@@ -77,6 +78,7 @@ export const matchSeed: MatchPreview[] = [
   },
   {
     id: "m2",
+    otherUserId: "u3",
     name: "Taylor",
     avatarUrl: "https://picsum.photos/200/200?42",
     messagesUsedByMe: 30,

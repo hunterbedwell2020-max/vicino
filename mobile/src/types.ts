@@ -24,6 +24,7 @@ export interface ChatMessage {
 
 export interface MatchPreview {
   id: string;
+  otherUserId: string;
   name: string;
   avatarUrl: string | null;
   messagesUsedByMe: number;
@@ -41,6 +42,7 @@ export interface MeetupCandidate {
   userId: string;
   name: string;
   response: CandidateResponse;
+  photos?: string[];
 }
 
 export interface OutTonightState {

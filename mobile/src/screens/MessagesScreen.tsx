@@ -17,6 +17,7 @@ import type { MatchPreview, MeetDecision } from "../types";
 export function MessagesScreen({
   matches,
   activeMatch,
+  openMatchProfile,
   openChat,
   closeChat,
   sendMessage,
@@ -27,6 +28,7 @@ export function MessagesScreen({
 }: {
   matches: MatchPreview[];
   activeMatch: MatchPreview | null;
+  openMatchProfile: (matchId: string) => void;
   openChat: (matchId: string) => void;
   closeChat: () => void;
   sendMessage: (
@@ -203,13 +205,15 @@ export function MessagesScreen({
           return (
             <Pressable style={styles.listCard} onPress={() => openChat(item.id)}>
               <View style={styles.listRow}>
-                {item.avatarUrl ? (
-                  <Image source={{ uri: item.avatarUrl }} style={styles.avatar} resizeMode="cover" />
-                ) : (
-                  <View style={styles.avatarFallback}>
-                    <Text style={styles.avatarFallbackText}>{item.name.slice(0, 1).toUpperCase()}</Text>
-                  </View>
-                )}
+                <Pressable onPress={() => openMatchProfile(item.id)}>
+                  {item.avatarUrl ? (
+                    <Image source={{ uri: item.avatarUrl }} style={styles.avatar} resizeMode="cover" />
+                  ) : (
+                    <View style={styles.avatarFallback}>
+                      <Text style={styles.avatarFallbackText}>{item.name.slice(0, 1).toUpperCase()}</Text>
+                    </View>
+                  )}
+                </Pressable>
                 <View style={styles.listTextWrap}>
                   <Text style={styles.name}>{item.name}</Text>
                   <Text style={styles.preview}>{preview}</Text>
@@ -254,15 +258,17 @@ export function MessagesScreen({
           <Text style={styles.back}>{"< Back"}</Text>
         </Pressable>
         <View style={styles.headerIdentity}>
-          {activeMatch.avatarUrl ? (
-            <Image source={{ uri: activeMatch.avatarUrl }} style={styles.headerAvatar} resizeMode="cover" />
-          ) : (
-            <View style={styles.headerAvatarFallback}>
-              <Text style={styles.headerAvatarFallbackText}>
-                {activeMatch.name.slice(0, 1).toUpperCase()}
-              </Text>
-            </View>
-          )}
+          <Pressable onPress={() => openMatchProfile(activeMatch.id)}>
+            {activeMatch.avatarUrl ? (
+              <Image source={{ uri: activeMatch.avatarUrl }} style={styles.headerAvatar} resizeMode="cover" />
+            ) : (
+              <View style={styles.headerAvatarFallback}>
+                <Text style={styles.headerAvatarFallbackText}>
+                  {activeMatch.name.slice(0, 1).toUpperCase()}
+                </Text>
+              </View>
+            )}
+          </Pressable>
           <Text style={styles.chatName}>{activeMatch.name}</Text>
         </View>
         <Text style={styles.counts}>

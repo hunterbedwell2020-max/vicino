@@ -80,6 +80,7 @@ function toMatchPreview(
 
   return {
     id: apiMatch.id,
+    otherUserId: otherId,
     name: otherUser?.firstName ?? "Match",
     avatarUrl: otherUser?.profilePhotoUrl
       ? String(otherUser.profilePhotoUrl)
@@ -99,7 +100,8 @@ function mapCandidates(rows: AvailabilityCandidate[]) {
     matchId: row.matchId,
     userId: row.candidateUserId,
     name: row.firstName,
-    response: row.response
+    response: row.response,
+    photos: Array.isArray(row.photos) ? row.photos : []
   }));
 }
 
@@ -523,6 +525,28 @@ export function useVicinoState(currentUserId: string | null) {
     }
   };
 
+  const getProfileCardByMatchId = (matchId: string): ProfileCard | null => {
+    const match = matches.find((m) => m.id === matchId);
+    if (!match) {
+      return null;
+    }
+
+    const user = usersById[match.otherUserId];
+    if (user) {
+      return toDeckCard(user);
+    }
+
+    return {
+      id: match.otherUserId,
+      name: match.name,
+      age: 18,
+      bio: "Profile details unavailable.",
+      photos: match.avatarUrl ? [match.avatarUrl] : ["https://picsum.photos/600/900"],
+      hobbies: ["Intentional dating"],
+      questionAnswers: [{ question: "About me", answer: "Profile details unavailable right now." }]
+    };
+  };
+
   const stats = useMemo(() => {
     const capped = matches.filter(messageCapReached).length;
     return { totalMatches: matches.length, cappedChats: capped };
@@ -558,6 +582,7 @@ export function useVicinoState(currentUserId: string | null) {
     sendMeetOffer,
     respondToMeetOffer,
     syncMeetupTimers,
+    getProfileCardByMatchId,
     openChat,
     closeChat: () => setActiveChatMatchId(null)
   };
