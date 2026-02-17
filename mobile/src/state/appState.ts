@@ -359,7 +359,7 @@ export function useVicinoState(currentUserId: string | null) {
 
   const setMeetDecision = async (matchId: string, user: "me" | "them", decision: MeetDecision) => {
     const match = matches.find((m) => m.id === matchId);
-    if (!match || !messageCapReached(match)) {
+    if (!match) {
       return;
     }
 

@@ -52,7 +52,7 @@ export function MessagesScreen({
   );
 
   const meetSummary = useMemo(() => {
-    if (!activeMatch || !capReached) {
+    if (!activeMatch) {
       return null;
     }
 
@@ -69,7 +69,9 @@ export function MessagesScreen({
         <Text style={styles.promptStatus}>
           {bothMeetYes(activeMatch)
             ? "Both selected YES. This match is now eligible for the 'I am out and open to meeting' flow."
-            : "Both responses are required before out-tonight eligibility."}
+            : capReached
+              ? "Both responses are required before out-tonight eligibility."
+              : "You can answer now or later. Both YES is required for out-tonight eligibility."}
         </Text>
       </View>
     );
@@ -261,17 +263,21 @@ export function MessagesScreen({
 
       {!capReached && (
         <View style={styles.composeWrap}>
-          <TextInput
-            value={compose}
-            onChangeText={setCompose}
-            placeholder="Write a message..."
-            placeholderTextColor={theme.colors.muted}
-            style={styles.input}
-          />
-          <View style={styles.composeActions}>
-            <Pressable style={styles.composeBtn} onPress={sendMine}>
-              <Text style={styles.composeBtnText}>Send</Text>
+          <View style={styles.inputRow}>
+            <TextInput
+              value={compose}
+              onChangeText={setCompose}
+              placeholder="Write a message..."
+              placeholderTextColor={theme.colors.muted}
+              style={styles.input}
+              returnKeyType="send"
+              onSubmitEditing={() => void sendMine()}
+            />
+            <Pressable style={styles.sendFab} onPress={() => void sendMine()}>
+              <Text style={styles.sendFabIcon}>➤</Text>
             </Pressable>
+          </View>
+          <View style={styles.composeActions}>
             <Pressable style={[styles.composeBtn, styles.replyBtn]} onPress={sendTheirs}>
               <Text style={styles.composeBtnText}>Sim Reply</Text>
             </Pressable>
@@ -414,12 +420,32 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 4
   },
+  inputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8
+  },
   input: {
+    flex: 1,
     backgroundColor: "#F2ECF8",
     borderRadius: theme.radius.sm,
     paddingHorizontal: 12,
     paddingVertical: 10,
     color: theme.colors.text
+  },
+  sendFab: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: theme.colors.primary,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  sendFabIcon: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "800",
+    marginLeft: 1
   },
   composeActions: { flexDirection: "row", gap: 8 },
   composeBtn: {
