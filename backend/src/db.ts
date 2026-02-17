@@ -309,6 +309,15 @@ export async function initDb() {
       expires_at TIMESTAMPTZ NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS auth_refresh_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      refresh_token_hash TEXT NOT NULL UNIQUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      revoked_at TIMESTAMPTZ NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_matches_pair ON matches (user_a_id, user_b_id);
     CREATE INDEX IF NOT EXISTS idx_matches_user_a_created ON matches (user_a_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_matches_user_b_created ON matches (user_b_id, created_at DESC);
@@ -322,6 +331,8 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_users_geo ON users (latitude, longitude);
     CREATE INDEX IF NOT EXISTS idx_verification_submissions_status ON verification_submissions (status, submitted_at DESC);
     CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions (user_id);
+    CREATE INDEX IF NOT EXISTS idx_auth_refresh_sessions_user ON auth_refresh_sessions (user_id);
+    CREATE INDEX IF NOT EXISTS idx_auth_refresh_sessions_expires ON auth_refresh_sessions (expires_at);
   `);
 
   await pool.query(`

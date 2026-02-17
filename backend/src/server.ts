@@ -2,8 +2,9 @@ import cors from "cors";
 import express from "express";
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { initDb } from "./db.js";
+import { initDb, pool } from "./db.js";
 import {
   assertVerifiedUser,
   assertAdminSession,
@@ -22,6 +23,7 @@ import {
   getAuthSession,
   loginAuthUser,
   logoutAuthSession,
+  refreshAuthSession,
   registerAuthUser,
   reviewVerificationSubmission,
   respondAvailabilityInterest,
@@ -35,14 +37,52 @@ import {
   updateUserLocation,
   swipe
 } from "./logic.js";
+import { createRateLimit } from "./rateLimit.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
+app.use((req, res, next) => {
+  const requestId = randomUUID();
+  const started = Date.now();
+  const originalSend = res.send.bind(res);
+  res.send = ((body?: unknown) => {
+    const durationMs = Date.now() - started;
+    console.log(
+      JSON.stringify({
+        level: "info",
+        event: "http_request",
+        requestId,
+        method: req.method,
+        path: req.path,
+        statusCode: res.statusCode,
+        durationMs
+      })
+    );
+    return originalSend(body as never);
+  }) as typeof res.send;
+  res.setHeader("x-request-id", requestId);
+  next();
+});
 const uploadsDir = path.join(process.cwd(), "uploads");
 fs.mkdirSync(uploadsDir, { recursive: true });
 app.use("/uploads", express.static(uploadsDir));
 const ADMIN_REVIEW_KEY = process.env.ADMIN_REVIEW_KEY ?? "";
+const MAX_UPLOAD_BYTES = Math.max(256 * 1024, Number(process.env.MAX_UPLOAD_BYTES ?? 5 * 1024 * 1024));
+const ALLOWED_UPLOAD_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic"]);
+
+const authRateLimit = createRateLimit({ windowMs: 15 * 60 * 1000, max: 50, keyPrefix: "auth" });
+const loginRateLimit = createRateLimit({ windowMs: 15 * 60 * 1000, max: 20, keyPrefix: "auth-login" });
+const userActionRateLimit = createRateLimit({ windowMs: 60 * 1000, max: 120, keyPrefix: "user-actions" });
+const uploadRateLimit = createRateLimit({ windowMs: 60 * 1000, max: 30, keyPrefix: "uploads" });
+const adminRateLimit = createRateLimit({ windowMs: 60 * 1000, max: 60, keyPrefix: "admin" });
+
+function estimateBase64Bytes(base64Data: string) {
+  const body = base64Data.replace(/^data:[^;]+;base64,/, "");
+  const paddingMatch = body.match(/=+$/);
+  const padding = paddingMatch ? paddingMatch[0].length : 0;
+  return Math.floor((body.length * 3) / 4) - padding;
+}
 
 const requireAdminAccess: express.RequestHandler = async (req, res, next) => {
   const token = String(req.header("authorization") ?? "").replace(/^Bearer\s+/i, "");
@@ -70,9 +110,18 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "vicino-backend" });
 });
 
-app.post("/uploads/image-base64", async (req, res) => {
+app.get("/readyz", async (_req, res) => {
+  try {
+    await pool.query("SELECT 1");
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(503).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+app.post("/uploads/image-base64", uploadRateLimit, async (req, res) => {
   const schema = z.object({
-    base64: z.string().min(1),
+    base64: z.string().min(1).max(14_000_000),
     mimeType: z.string().optional(),
     filename: z.string().optional()
   });
@@ -82,7 +131,15 @@ app.post("/uploads/image-base64", async (req, res) => {
   }
 
   try {
-    const mime = (parsed.data.mimeType ?? "image/jpeg").toLowerCase();
+    const mime = (parsed.data.mimeType ?? "image/jpeg").toLowerCase().trim();
+    if (!ALLOWED_UPLOAD_MIME_TYPES.has(mime)) {
+      return res.status(400).json({ error: "Unsupported image type. Allowed: jpeg, png, webp, heic." });
+    }
+    const estimatedBytes = estimateBase64Bytes(parsed.data.base64);
+    if (estimatedBytes > MAX_UPLOAD_BYTES) {
+      return res.status(400).json({ error: `Image too large. Max ${MAX_UPLOAD_BYTES} bytes.` });
+    }
+
     const ext = mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : mime.includes("heic") ? "heic" : "jpg";
     const safeName = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${ext}`;
     const body = parsed.data.base64.replace(/^data:[^;]+;base64,/, "");
@@ -104,7 +161,7 @@ app.get("/users", async (_req, res) => {
   }
 });
 
-app.post("/auth/register", async (req, res) => {
+app.post("/auth/register", authRateLimit, async (req, res) => {
   const schema = z.object({
     email: z.string().email(),
     username: z
@@ -131,7 +188,7 @@ app.post("/auth/register", async (req, res) => {
   }
 });
 
-app.post("/auth/login", async (req, res) => {
+app.post("/auth/login", authRateLimit, loginRateLimit, async (req, res) => {
   const schema = z.object({
     username: z.string().min(3).max(24),
     password: z.string().min(8).max(200)
@@ -144,6 +201,23 @@ app.post("/auth/login", async (req, res) => {
   try {
     const row = await loginAuthUser(parsed.data.username, parsed.data.password);
     return res.json(row);
+  } catch (err) {
+    return res.status(401).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/auth/refresh", authRateLimit, async (req, res) => {
+  const schema = z.object({
+    refreshToken: z.string().min(32)
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+
+  try {
+    const refreshed = await refreshAuthSession(parsed.data.refreshToken);
+    return res.json(refreshed);
   } catch (err) {
     return res.status(401).json({ error: (err as Error).message });
   }
@@ -211,7 +285,7 @@ app.post("/verification/submit", async (req, res) => {
   }
 });
 
-app.get("/admin/verifications", requireAdminAccess, async (req, res) => {
+app.get("/admin/verifications", adminRateLimit, requireAdminAccess, async (req, res) => {
   const status = String(req.query.status ?? "pending");
   const validStatus = ["pending", "approved", "rejected", "all"].includes(status)
     ? (status as "pending" | "approved" | "rejected" | "all")
@@ -226,7 +300,7 @@ app.get("/admin/verifications", requireAdminAccess, async (req, res) => {
   }
 });
 
-app.post("/admin/verifications/:submissionId/review", requireAdminAccess, async (req, res) => {
+app.post("/admin/verifications/:submissionId/review", adminRateLimit, requireAdminAccess, async (req, res) => {
   const schema = z.object({
     decision: z.enum(["approved", "rejected"]),
     reviewerId: z.string(),
@@ -346,7 +420,7 @@ app.get("/offers", async (_req, res) => {
   }
 });
 
-app.post("/swipes", async (req, res) => {
+app.post("/swipes", userActionRateLimit, async (req, res) => {
   const schema = z.object({
     fromUserId: z.string(),
     toUserId: z.string(),
@@ -367,7 +441,7 @@ app.post("/swipes", async (req, res) => {
   }
 });
 
-app.post("/messages", async (req, res) => {
+app.post("/messages", userActionRateLimit, async (req, res) => {
   const schema = z.object({
     matchId: z.string(),
     senderUserId: z.string(),
@@ -398,7 +472,7 @@ app.get("/messages/:matchId", async (req, res) => {
   }
 });
 
-app.post("/meet-decisions", async (req, res) => {
+app.post("/meet-decisions", userActionRateLimit, async (req, res) => {
   const schema = z.object({
     matchId: z.string(),
     userId: z.string(),
@@ -419,7 +493,7 @@ app.post("/meet-decisions", async (req, res) => {
   }
 });
 
-app.post("/availability/start", async (req, res) => {
+app.post("/availability/start", userActionRateLimit, async (req, res) => {
   const schema = z.object({ initiatorUserId: z.string() });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -454,7 +528,7 @@ app.get("/availability/:sessionId/candidates", async (req, res) => {
   }
 });
 
-app.post("/availability/respond-interest", async (req, res) => {
+app.post("/availability/respond-interest", userActionRateLimit, async (req, res) => {
   const schema = z.object({
     sessionId: z.string(),
     userId: z.string(),
@@ -478,7 +552,7 @@ app.post("/availability/respond-interest", async (req, res) => {
   }
 });
 
-app.post("/availability/:sessionId/close", async (req, res) => {
+app.post("/availability/:sessionId/close", userActionRateLimit, async (req, res) => {
   const schema = z.object({ initiatorUserId: z.string() });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -487,14 +561,14 @@ app.post("/availability/:sessionId/close", async (req, res) => {
 
   try {
     await assertVerifiedUser(parsed.data.initiatorUserId);
-    const result = await closeAvailability(req.params.sessionId, parsed.data.initiatorUserId);
+    const result = await closeAvailability(String(req.params.sessionId), parsed.data.initiatorUserId);
     return res.json(result);
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
   }
 });
 
-app.post("/offers", async (req, res) => {
+app.post("/offers", userActionRateLimit, async (req, res) => {
   const schema = z.object({
     sessionId: z.string(),
     initiatorUserId: z.string(),
@@ -524,7 +598,7 @@ app.post("/offers", async (req, res) => {
   }
 });
 
-app.post("/offers/respond", async (req, res) => {
+app.post("/offers/respond", userActionRateLimit, async (req, res) => {
   const schema = z.object({
     offerId: z.string(),
     recipientUserId: z.string(),

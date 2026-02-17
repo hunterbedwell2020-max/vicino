@@ -150,6 +150,7 @@ export interface VerificationSubmission {
 
 export interface AuthResponse {
   token: string;
+  refreshToken?: string;
   user: ApiUser;
 }
 
@@ -157,6 +158,10 @@ export interface AuthSessionResponse {
   token: string;
   user: ApiUser;
   verification: VerificationStatus;
+}
+
+export interface RefreshAuthResponse extends AuthSessionResponse {
+  refreshToken: string;
 }
 
 export interface UploadImageResponse {
@@ -211,6 +216,13 @@ export function postLogout(token: string) {
     headers: {
       Authorization: `Bearer ${token}`
     }
+  });
+}
+
+export function postRefreshAuth(refreshToken: string) {
+  return request<RefreshAuthResponse>("/auth/refresh", {
+    method: "POST",
+    body: JSON.stringify({ refreshToken })
   });
 }
 

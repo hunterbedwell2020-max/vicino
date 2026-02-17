@@ -1,5 +1,6 @@
 import { pool } from "./db.js";
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createAccessToken, createRefreshToken, verifyAccessToken } from "./authToken.js";
 import {
   COORDINATION_WINDOW_MINUTES,
   LOCATION_EXPIRY_MINUTES,
@@ -11,7 +12,7 @@ import type { MeetDecision, SwipeDecision } from "./types.js";
 
 const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 const now = () => new Date();
-const SESSION_DAYS = 30;
+const REFRESH_SESSION_DAYS = Math.max(7, Number(process.env.JWT_REFRESH_DAYS ?? 30));
 
 type DbMatch = {
   id: string;
@@ -75,6 +76,58 @@ function ensureNotBanned(row: Record<string, unknown>) {
   if (Boolean(row.is_banned)) {
     throw new Error("Account is suspended. Contact support for review.");
   }
+}
+
+function hashRefreshToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function mapVerification(row: Record<string, unknown>) {
+  return {
+    userId: String(row.id),
+    verified: Boolean(row.verified),
+    status: row.verification_status as "unsubmitted" | "pending" | "approved" | "rejected",
+    submittedAt: row.verification_submitted_at ? String(row.verification_submitted_at) : null,
+    reviewedAt: row.verification_reviewed_at ? String(row.verification_reviewed_at) : null,
+    reviewerNote: row.verification_reviewer_note ? String(row.verification_reviewer_note) : null
+  };
+}
+
+async function createAuthTokensForUser(user: Record<string, unknown>) {
+  const sessionId = id("as");
+  const refreshToken = createRefreshToken();
+  const refreshTokenHash = hashRefreshToken(refreshToken);
+
+  await pool.query(
+    `INSERT INTO auth_refresh_sessions (id, user_id, refresh_token_hash, expires_at)
+     VALUES ($1, $2, $3, NOW() + ($4 || ' days')::interval)`,
+    [sessionId, String(user.id), refreshTokenHash, REFRESH_SESSION_DAYS]
+  );
+
+  return {
+    token: createAccessToken({
+      userId: String(user.id),
+      sessionId,
+      isAdmin: Boolean(user.is_admin)
+    }),
+    refreshToken
+  };
+}
+
+async function fetchSessionUser(userId: string) {
+  const { rows } = await pool.query(
+    `SELECT id, first_name, last_name, username, is_admin, email, phone, is_banned, age, gender, preferred_gender, likes, dislikes,
+            bio, profile_photo_url, verified, photos, hobbies, prompt_one, prompt_two, prompt_three, max_distance_miles,
+            verification_status, verification_submitted_at, verification_reviewed_at, verification_reviewer_note
+     FROM users
+     WHERE id = $1`,
+    [userId]
+  );
+  if (!rows[0]) {
+    throw new Error("User not found");
+  }
+  ensureNotBanned(rows[0]);
+  return rows[0] as Record<string, unknown>;
 }
 
 async function getUser(userId: string) {
@@ -219,14 +272,8 @@ export async function registerAuthUser(input: {
       ]
     );
 
-    const token = randomBytes(32).toString("hex");
-    await pool.query(
-      `INSERT INTO auth_sessions (token, user_id, expires_at)
-       VALUES ($1, $2, NOW() + ($3 || ' days')::interval)`,
-      [token, userId, SESSION_DAYS]
-    );
-
-    return { user: mapUser(rows[0]), token };
+    const tokens = await createAuthTokensForUser(rows[0] as Record<string, unknown>);
+    return { user: mapUser(rows[0]), ...tokens };
   } catch (err) {
     const pgErr = err as { code?: string; detail?: string };
     if (pgErr.code === "23505") {
@@ -255,42 +302,28 @@ export async function loginAuthUser(username: string, password: string) {
     throw new Error("Invalid username or password.");
   }
 
-  const token = randomBytes(32).toString("hex");
-  await pool.query(
-    `INSERT INTO auth_sessions (token, user_id, expires_at)
-     VALUES ($1, $2, NOW() + ($3 || ' days')::interval)`,
-    [token, user.id, SESSION_DAYS]
-  );
-
-  return { user: mapUser(user), token };
+  const tokens = await createAuthTokensForUser(user as Record<string, unknown>);
+  return { user: mapUser(user), ...tokens };
 }
 
 export async function getAuthSession(token: string) {
-  const { rows } = await pool.query(
-    `SELECT u.id, u.first_name, u.last_name, u.username, u.is_admin, u.email, u.phone, u.is_banned, u.age, u.gender, u.preferred_gender, u.likes, u.dislikes,
-            u.bio, u.profile_photo_url, u.verified, u.photos, u.hobbies, u.prompt_one, u.prompt_two, u.prompt_three, u.max_distance_miles,
-            u.verification_status, u.verification_submitted_at, u.verification_reviewed_at, u.verification_reviewer_note
-     FROM auth_sessions s
-     JOIN users u ON u.id = s.user_id
-     WHERE s.token = $1 AND s.expires_at > NOW()`,
-    [token]
+  const payload = verifyAccessToken(token);
+  const sessionRes = await pool.query(
+    `SELECT id
+     FROM auth_refresh_sessions
+     WHERE id = $1
+       AND revoked_at IS NULL
+       AND expires_at > NOW()`,
+    [payload.sid]
   );
-  if (rows.length === 0) {
+  if (sessionRes.rowCount === 0) {
     throw new Error("Session expired. Please sign in again.");
   }
-  const row = rows[0];
-  ensureNotBanned(row);
+  const row = await fetchSessionUser(payload.sub);
   return {
     token,
     user: mapUser(row),
-    verification: {
-      userId: String(row.id),
-      verified: Boolean(row.verified),
-      status: row.verification_status as "unsubmitted" | "pending" | "approved" | "rejected",
-      submittedAt: row.verification_submitted_at,
-      reviewedAt: row.verification_reviewed_at,
-      reviewerNote: row.verification_reviewer_note
-    }
+    verification: mapVerification(row)
   };
 }
 
@@ -303,7 +336,54 @@ export async function assertAdminSession(token: string) {
 }
 
 export async function logoutAuthSession(token: string) {
-  await pool.query(`DELETE FROM auth_sessions WHERE token = $1`, [token]);
+  const payload = verifyAccessToken(token);
+  await pool.query(
+    `UPDATE auth_refresh_sessions
+     SET revoked_at = NOW()
+     WHERE id = $1`,
+    [payload.sid]
+  );
+}
+
+export async function refreshAuthSession(refreshToken: string) {
+  const refreshTokenHash = hashRefreshToken(refreshToken);
+  const sessionRes = await pool.query(
+    `SELECT id, user_id
+     FROM auth_refresh_sessions
+     WHERE refresh_token_hash = $1
+       AND revoked_at IS NULL
+       AND expires_at > NOW()
+     LIMIT 1`,
+    [refreshTokenHash]
+  );
+  if (sessionRes.rowCount === 0) {
+    throw new Error("Refresh token expired. Please sign in again.");
+  }
+
+  const session = sessionRes.rows[0];
+  const user = await fetchSessionUser(String(session.user_id));
+
+  const nextRefresh = createRefreshToken();
+  const nextRefreshHash = hashRefreshToken(nextRefresh);
+  await pool.query(
+    `UPDATE auth_refresh_sessions
+     SET refresh_token_hash = $2
+     WHERE id = $1`,
+    [session.id, nextRefreshHash]
+  );
+
+  const nextAccessToken = createAccessToken({
+    userId: String(user.id),
+    sessionId: String(session.id),
+    isAdmin: Boolean(user.is_admin)
+  });
+
+  return {
+    token: nextAccessToken,
+    refreshToken: nextRefresh,
+    user: mapUser(user),
+    verification: mapVerification(user)
+  };
 }
 
 export async function updateUserProfile(
