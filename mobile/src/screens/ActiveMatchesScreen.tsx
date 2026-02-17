@@ -68,10 +68,8 @@ export function ActiveMatchesScreen({
   return (
     <View style={styles.wrap}>
       <View style={styles.sessionCard}>
-        <Text style={styles.sessionTitle}>I'm out and open to meeting</Text>
-        <Text style={styles.sessionSub}>
-          Eligible matches (both said yes): {eligibleOutCount}
-        </Text>
+        <Text style={styles.sessionTitle}>Out Tonight</Text>
+        <Text style={styles.sessionSub}>Mutual yes matches: {eligibleOutCount}</Text>
         <View style={styles.sessionActions}>
           {!outTonight.enabled ? (
             <View style={styles.logoActionWrap}>
@@ -93,22 +91,18 @@ export function ActiveMatchesScreen({
             </Pressable>
           )}
         </View>
-        {eligibleOutCount === 0 ? (
-          <Text style={styles.flowHint}>
-            Requires at least one match where both people selected YES in Messages.
-          </Text>
-        ) : null}
+        {eligibleOutCount === 0 ? <Text style={styles.flowHint}>No mutual yes matches yet.</Text> : null}
         {outTonight.error ? <Text style={styles.errorText}>{outTonight.error}</Text> : null}
 
         {outTonight.enabled && (
           <View style={styles.flowWrap}>
-            <Text style={styles.flowTitle}>Step 1: Gather interest</Text>
+            <Text style={styles.flowTitle}>Interested now</Text>
             <Pressable style={[styles.actionBtn, styles.secondaryBtn]} onPress={simulateCandidateResponses}>
-              <Text style={styles.actionBtnText}>Simulate Responses</Text>
+              <Text style={styles.actionBtnText}>Refresh Responses</Text>
             </Pressable>
 
             {outTonight.candidates.length === 0 ? (
-              <Text style={styles.flowHint}>No eligible matches yet. Both must answer YES in Messages.</Text>
+              <Text style={styles.flowHint}>No candidates yet.</Text>
             ) : (
               outTonight.candidates.map((candidate) => (
                 <View key={candidate.matchId} style={styles.candidateRow}>
@@ -124,7 +118,18 @@ export function ActiveMatchesScreen({
                     )}
                   </Pressable>
                   <Text style={styles.candidateName}>{candidate.name}</Text>
-                  <Text style={styles.candidateStatus}>{candidate.response.toUpperCase()}</Text>
+                  <View
+                    style={[
+                      styles.candidateStatusChip,
+                      candidate.response === "yes"
+                        ? styles.statusYes
+                        : candidate.response === "no"
+                          ? styles.statusNo
+                          : styles.statusPending
+                    ]}
+                  >
+                    <Text style={styles.candidateStatus}>{candidate.response.toUpperCase()}</Text>
+                  </View>
                   <Pressable
                     disabled={candidate.response !== "yes"}
                     onPress={() => chooseCandidate(candidate.matchId)}
@@ -141,12 +146,12 @@ export function ActiveMatchesScreen({
             )}
 
             {yesCandidates.length > 0 && !outTonight.selectedCandidateMatchId && (
-              <Text style={styles.flowHint}>Step 2: Pick one YES response to send location to.</Text>
+              <Text style={styles.flowHint}>Pick one YES to send location.</Text>
             )}
 
             {selectedCandidate && (
               <View style={styles.offerWrap}>
-                <Text style={styles.flowTitle}>Step 3: Send public place to {selectedCandidate.name}</Text>
+                <Text style={styles.flowTitle}>Send public place to {selectedCandidate.name}</Text>
                 <View style={styles.placeList}>
                   {PLACE_OPTIONS.map((place) => (
                     <Pressable key={place} style={styles.placeBtn} onPress={() => sendMeetOffer(place)}>
@@ -165,10 +170,10 @@ export function ActiveMatchesScreen({
                 </Text>
                 <View style={styles.offerActions}>
                   <Pressable style={[styles.actionBtn, styles.acceptBtn]} onPress={() => respondToMeetOffer(true)}>
-                    <Text style={styles.actionBtnText}>Sim Accept</Text>
+                    <Text style={styles.actionBtnText}>Accept</Text>
                   </Pressable>
                   <Pressable style={[styles.actionBtn, styles.declineBtn]} onPress={() => respondToMeetOffer(false)}>
-                    <Text style={styles.actionBtnText}>Sim Decline</Text>
+                    <Text style={styles.actionBtnText}>Decline</Text>
                   </Pressable>
                 </View>
               </View>
@@ -188,7 +193,7 @@ export function ActiveMatchesScreen({
 
             {(outTonight.offerStatus === "declined" || outTonight.offerStatus === "expired") && (
               <Text style={styles.flowHint}>
-                Offer {outTonight.offerStatus}. Pick another YES candidate and resend a location.
+                Offer {outTonight.offerStatus}. Pick another YES and resend.
               </Text>
             )}
           </View>
@@ -197,6 +202,7 @@ export function ActiveMatchesScreen({
 
       {matches.map((match) => {
         const capped = messageCapReached(match);
+        const bothYes = bothMeetYes(match);
         return (
           <View key={match.id} style={styles.card}>
             <View style={styles.matchHeaderRow}>
@@ -213,19 +219,12 @@ export function ActiveMatchesScreen({
               </Pressable>
               <Text style={styles.name}>{match.name}</Text>
             </View>
-            <Text style={styles.detail}>
-              {capped
-                ? "60-message cap complete. Decision prompt is now active in the DM thread."
-                : "Still in messaging phase."}
-            </Text>
-            <Text style={styles.detail}>
-              You: {match.meetDecisionByMe ?? "pending"} | Them: {match.meetDecisionByThem ?? "pending"}
-            </Text>
-            <Text style={styles.detail}>
-              {bothMeetYes(match)
-                ? "Both said yes. Eligible for 'I am out and open to meeting'."
-                : "Not yet mutually meetup-ready."}
-            </Text>
+            <View style={[styles.meetBadge, bothYes ? styles.meetBadgeYes : styles.meetBadgePending]}>
+              <Text style={styles.meetBadgeText}>
+                {bothYes ? "Both said YES" : "Meet status: Not yet"}
+              </Text>
+            </View>
+            {!capped ? <Text style={styles.detail}>Messaging in progress</Text> : null}
           </View>
         );
       })}
@@ -313,7 +312,21 @@ const styles = StyleSheet.create({
     fontWeight: "800"
   },
   candidateName: { flex: 1, color: theme.colors.text, fontWeight: "700" },
-  candidateStatus: { color: theme.colors.primary, fontWeight: "700", fontSize: 12 },
+  candidateStatusChip: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4
+  },
+  statusYes: {
+    backgroundColor: "#D8F3E7"
+  },
+  statusNo: {
+    backgroundColor: "#FBE7E7"
+  },
+  statusPending: {
+    backgroundColor: "#ECECEC"
+  },
+  candidateStatus: { color: theme.colors.primary, fontWeight: "700", fontSize: 11 },
   pickBtn: {
     backgroundColor: theme.colors.primary,
     borderRadius: 8,
@@ -370,5 +383,22 @@ const styles = StyleSheet.create({
     fontWeight: "800"
   },
   name: { fontSize: 18, fontWeight: "700", color: theme.colors.text },
-  detail: { color: theme.colors.muted }
+  detail: { color: theme.colors.muted },
+  meetBadge: {
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6
+  },
+  meetBadgeYes: {
+    backgroundColor: "#D8F3E7"
+  },
+  meetBadgePending: {
+    backgroundColor: "#ECECEC"
+  },
+  meetBadgeText: {
+    color: theme.colors.text,
+    fontWeight: "700",
+    fontSize: 12
+  }
 });
