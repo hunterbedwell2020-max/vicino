@@ -27,6 +27,7 @@ export function TabBar({
           onPress={() => onChange(tab.key)}
           style={[
             styles.item,
+            tab.key !== "matches" && styles.sideItem,
             tab.key === "matches" && styles.centerItem,
             active === tab.key && tab.key !== "matches" && styles.activeItem
           ]}
@@ -59,10 +60,8 @@ export function TabBar({
 const styles = StyleSheet.create({
   wrap: {
     flexDirection: "row",
-    backgroundColor: theme.colors.card,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
     gap: 6
   },
   item: {
@@ -71,6 +70,9 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     alignItems: "center",
     justifyContent: "center"
+  },
+  sideItem: {
+    backgroundColor: theme.colors.card
   },
   activeItem: {
     backgroundColor: theme.colors.primary
