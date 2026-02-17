@@ -1,6 +1,17 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect, useState } from "react";
-import { AppState, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, View } from "react-native";
+import {
+  AppState,
+  Image,
+  Modal,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View
+} from "react-native";
 import * as Location from "expo-location";
 import { getAuthSession, postLogout, postUserLocation, type ApiUser, type VerificationStatus } from "./src/api";
 import { TabBar } from "./src/components/TabBar";
@@ -22,6 +33,7 @@ export default function App() {
   const [user, setUser] = useState<ApiUser | null>(null);
   const [verification, setVerification] = useState<VerificationStatus | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   const canAccessApp = Boolean(user && (user.isAdmin || verification?.status === "approved"));
   const activeUserId = canAccessApp && user ? user.id : null;
@@ -61,7 +73,16 @@ export default function App() {
     if (!user?.isAdmin && state.tab === "admin") {
       state.setTab("swipe");
     }
+    if (state.tab === "profile") {
+      state.setTab("swipe");
+    }
   }, [user?.isAdmin, state.tab, state.setTab]);
+
+  useEffect(() => {
+    if (!canAccessApp) {
+      setProfileOpen(false);
+    }
+  }, [canAccessApp]);
 
   useEffect(() => {
     if (!activeUserId) {
@@ -141,8 +162,23 @@ export default function App() {
       <SafeAreaView style={styles.safe}>
         <StatusBar barStyle="light-content" />
         <View style={styles.header}>
-          <Text style={styles.brand}>Vicino</Text>
-          <Text style={styles.subtitle}>Near, intentional, and in-person.</Text>
+          <View style={styles.headerTopRow}>
+            <View>
+              <Text style={styles.brand}>Vicino</Text>
+              <Text style={styles.subtitle}>Near, intentional, and in-person.</Text>
+            </View>
+            {!locked && user ? (
+              <Pressable style={styles.profileBtn} onPress={() => setProfileOpen(true)}>
+                {user.photos?.[0] ? (
+                  <Image source={{ uri: user.photos[0] }} style={styles.profileBtnImage} resizeMode="cover" />
+                ) : (
+                  <Text style={styles.profileBtnText}>
+                    {(user.firstName?.slice(0, 1) || "U").toUpperCase()}
+                  </Text>
+                )}
+              </Pressable>
+            ) : null}
+          </View>
         </View>
 
         <View style={styles.body}>
@@ -208,12 +244,6 @@ export default function App() {
                 </ScrollView>
               )}
 
-              {state.tab === "profile" && activeUserId ? (
-                <ScrollView contentContainerStyle={styles.scrollWrap}>
-                  <ProfileScreen userId={activeUserId} onSignOut={() => void signOut()} />
-                </ScrollView>
-              ) : null}
-
               {state.tab === "admin" && authToken && user?.isAdmin ? (
                 <ScrollView contentContainerStyle={styles.scrollWrap}>
                   <AdminScreen authToken={authToken} />
@@ -233,6 +263,28 @@ export default function App() {
             />
           </View>
         ) : null}
+
+        <Modal visible={profileOpen && Boolean(activeUserId)} animationType="slide">
+          <SafeAreaView style={styles.profileModalSafe}>
+            <View style={styles.profileModalHeader}>
+              <Text style={styles.profileModalTitle}>Profile & Settings</Text>
+              <Pressable onPress={() => setProfileOpen(false)}>
+                <Text style={styles.profileModalClose}>Close</Text>
+              </Pressable>
+            </View>
+            {activeUserId ? (
+              <ScrollView contentContainerStyle={styles.scrollWrap}>
+                <ProfileScreen
+                  userId={activeUserId}
+                  onSignOut={() => {
+                    setProfileOpen(false);
+                    void signOut();
+                  }}
+                />
+              </ScrollView>
+            ) : null}
+          </SafeAreaView>
+        </Modal>
       </SafeAreaView>
     </View>
   );
@@ -259,6 +311,12 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20
   },
+  headerTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10
+  },
   brand: {
     color: "#fff",
     fontWeight: "800",
@@ -267,6 +325,26 @@ const styles = StyleSheet.create({
   subtitle: {
     marginTop: 2,
     color: "#EADCF8"
+  },
+  profileBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#fff",
+    borderWidth: 2,
+    borderColor: "#EADCF8",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden"
+  },
+  profileBtnImage: {
+    width: "100%",
+    height: "100%"
+  },
+  profileBtnText: {
+    color: theme.colors.primary,
+    fontWeight: "800",
+    fontSize: 16
   },
   body: {
     flex: 1,
@@ -318,5 +396,26 @@ const styles = StyleSheet.create({
     color: "#B42318",
     fontWeight: "700",
     textAlign: "center"
+  },
+  profileModalSafe: {
+    flex: 1,
+    backgroundColor: theme.colors.background
+  },
+  profileModalHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between"
+  },
+  profileModalTitle: {
+    color: theme.colors.text,
+    fontSize: 18,
+    fontWeight: "800"
+  },
+  profileModalClose: {
+    color: theme.colors.primary,
+    fontWeight: "700"
   }
 });

@@ -17,7 +17,6 @@ export function TabBar({
     { key: "swipe", label: "Swipe" },
     { key: "messages", label: "Messages" },
     { key: "matches", label: "Matches" },
-    { key: "profile", label: "Profile" },
     ...(isAdmin ? [{ key: "admin" as const, label: "Admin" }] : [])
   ];
 
