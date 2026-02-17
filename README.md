@@ -48,6 +48,33 @@ npm run start
 
 Then open iOS/Android simulator from Expo.
 
+## Off-network Tester Installs (EAS)
+
+Use this when testers are not on your local network.
+
+```bash
+cd "/Users/hunterbedwell/Documents/Twitch bot/mobile"
+npm install
+npx eas login
+npx eas build:configure
+```
+
+Internal build links for testers:
+
+```bash
+cd "/Users/hunterbedwell/Documents/Twitch bot/mobile"
+EXPO_PUBLIC_API_BASE_URL="https://vicino-production.up.railway.app" npx eas build --platform ios --profile preview
+EXPO_PUBLIC_API_BASE_URL="https://vicino-production.up.railway.app" npx eas build --platform android --profile preview
+```
+
+Production App Store path:
+
+```bash
+cd "/Users/hunterbedwell/Documents/Twitch bot/mobile"
+EXPO_PUBLIC_API_BASE_URL="https://vicino-production.up.railway.app" npx eas build --platform ios --profile production
+npx eas submit --platform ios --profile production
+```
+
 ## Next build steps
 
 1. Replace in-memory storage with PostgreSQL + Prisma.

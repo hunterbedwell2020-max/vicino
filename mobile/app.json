@@ -3,6 +3,7 @@
     "name": "Vicino",
     "slug": "vicino",
     "version": "0.1.0",
+    "scheme": "vicino",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "splash": {
@@ -10,12 +11,28 @@
       "backgroundColor": "#5B2A86"
     },
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "com.vicino.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Vicino uses your camera for profile and identity verification photos.",
+        "NSPhotoLibraryUsageDescription": "Vicino uses your photo library for profile and identity verification photos.",
+        "NSUserTrackingUsageDescription": "Vicino does not use tracking across apps."
+      }
     },
-    "android": {},
+    "android": {
+      "package": "com.vicino.app",
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "POST_NOTIFICATIONS"
+      ]
+    },
     "web": {},
     "plugins": [
       "expo-asset",
+      "expo-notifications",
       [
         "expo-location",
         {
