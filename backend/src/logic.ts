@@ -815,47 +815,83 @@ export async function swipe(fromUserId: string, toUserId: string, decision: Swip
 }
 
 export async function sendMessage(matchId: string, senderUserId: string, body: string) {
-  const match = await getMatchById(matchId);
-  requireMatchMember(match, senderUserId);
-
   if (!body.trim()) {
     throw new Error("Message body cannot be empty");
   }
 
-  const counts = await getMessageCounts(matchId);
-  const senderCount = counts.byUser[senderUserId] ?? 0;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`match_messages:${matchId}`]);
 
-  if (senderCount >= MAX_MESSAGES_PER_USER) {
-    throw new Error("Per-person message limit reached");
+    const matchRes = await client.query(
+      `SELECT id, user_a_id, user_b_id, created_at, coordination_ends_at
+       FROM matches
+       WHERE id = $1
+       FOR UPDATE`,
+      [matchId]
+    );
+
+    const match = matchRes.rows[0] as DbMatch | undefined;
+    if (!match) {
+      throw new Error("Match not found");
+    }
+    requireMatchMember(match, senderUserId);
+
+    const countsRes = await client.query(
+      `SELECT sender_user_id, COUNT(*)::int AS count
+       FROM messages
+       WHERE match_id = $1
+       GROUP BY sender_user_id`,
+      [matchId]
+    );
+
+    const byUser: Record<string, number> = {};
+    let total = 0;
+    for (const row of countsRes.rows) {
+      byUser[String(row.sender_user_id)] = Number(row.count);
+      total += Number(row.count);
+    }
+
+    const senderCount = byUser[senderUserId] ?? 0;
+    if (senderCount >= MAX_MESSAGES_PER_USER) {
+      throw new Error("Per-person message limit reached");
+    }
+    if (total >= MAX_MESSAGES_TOTAL) {
+      throw new Error("Chat message cap reached");
+    }
+
+    const msgId = id("msg");
+    const inserted = await client.query(
+      `INSERT INTO messages (id, match_id, sender_user_id, body, created_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       RETURNING id, match_id, sender_user_id, body, created_at`,
+      [msgId, matchId, senderUserId, body]
+    );
+
+    await client.query("COMMIT");
+
+    const newSenderCount = senderCount + 1;
+    const newTotal = total + 1;
+
+    return {
+      message: {
+        id: inserted.rows[0].id,
+        matchId: inserted.rows[0].match_id,
+        senderUserId: inserted.rows[0].sender_user_id,
+        body: inserted.rows[0].body,
+        createdAt: inserted.rows[0].created_at
+      },
+      remainingForSender: MAX_MESSAGES_PER_USER - newSenderCount,
+      remainingTotal: MAX_MESSAGES_TOTAL - newTotal,
+      needsMeetDecision: newTotal >= MAX_MESSAGES_TOTAL
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
   }
-
-  if (counts.total >= MAX_MESSAGES_TOTAL) {
-    throw new Error("Chat message cap reached");
-  }
-
-  const msgId = id("msg");
-  const inserted = await pool.query(
-    `INSERT INTO messages (id, match_id, sender_user_id, body, created_at)
-     VALUES ($1, $2, $3, $4, NOW())
-     RETURNING id, match_id, sender_user_id, body, created_at`,
-    [msgId, matchId, senderUserId, body]
-  );
-
-  const newSenderCount = senderCount + 1;
-  const newTotal = counts.total + 1;
-
-  return {
-    message: {
-      id: inserted.rows[0].id,
-      matchId: inserted.rows[0].match_id,
-      senderUserId: inserted.rows[0].sender_user_id,
-      body: inserted.rows[0].body,
-      createdAt: inserted.rows[0].created_at
-    },
-    remainingForSender: MAX_MESSAGES_PER_USER - newSenderCount,
-    remainingTotal: MAX_MESSAGES_TOTAL - newTotal,
-    needsMeetDecision: newTotal >= MAX_MESSAGES_TOTAL
-  };
 }
 
 export async function setMeetDecision(matchId: string, userId: string, decision: MeetDecision) {
@@ -1040,108 +1076,169 @@ export async function createMeetupOffer(
   placeId: string,
   placeLabel: string
 ) {
-  const session = await getActiveSession(sessionId);
-  if (session.initiator_user_id !== initiatorUserId) {
-    throw new Error("Only session initiator can create offers");
-  }
-
   if (!isPublicPlaceId(placeId)) {
     throw new Error("Location must be a public mapped place");
   }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`offer_session:${sessionId}`]);
 
-  const candidate = await pool.query(
-    `SELECT response
-     FROM session_candidates
-     WHERE session_id = $1 AND candidate_user_id = $2`,
-    [sessionId, recipientUserId]
-  );
+    const sessionRes = await client.query(
+      `SELECT id, initiator_user_id, active
+       FROM availability_sessions
+       WHERE id = $1
+       FOR UPDATE`,
+      [sessionId]
+    );
+    if (sessionRes.rowCount === 0 || !sessionRes.rows[0]?.active) {
+      throw new Error("Active availability session not found");
+    }
+    const session = sessionRes.rows[0];
+    if (session.initiator_user_id !== initiatorUserId) {
+      throw new Error("Only session initiator can create offers");
+    }
 
-  if (candidate.rowCount === 0) {
-    throw new Error("Recipient is not part of this availability session");
+    const candidate = await client.query(
+      `SELECT response
+       FROM session_candidates
+       WHERE session_id = $1 AND candidate_user_id = $2
+       FOR UPDATE`,
+      [sessionId, recipientUserId]
+    );
+
+    if (candidate.rowCount === 0) {
+      throw new Error("Recipient is not part of this availability session");
+    }
+
+    if (candidate.rows[0].response !== "yes") {
+      throw new Error("Recipient has not opted in to meeting for this session");
+    }
+
+    await client.query(
+      `UPDATE meetup_offers
+       SET status = 'expired'
+       WHERE session_id = $1 AND status = 'pending'`,
+      [sessionId]
+    );
+
+    const createdAt = now();
+    const respondBy = new Date(createdAt.getTime() + OFFER_RESPONSE_SECONDS * 1000);
+    const locationExpiresAt = new Date(createdAt.getTime() + LOCATION_EXPIRY_MINUTES * 60 * 1000);
+
+    const offerId = id("offer");
+    const { rows } = await client.query(
+      `INSERT INTO meetup_offers (
+        id, session_id, initiator_user_id, recipient_user_id,
+        place_id, place_label, created_at, respond_by, location_expires_at, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')
+      RETURNING id, session_id, initiator_user_id, recipient_user_id,
+                place_id, place_label, created_at, respond_by, location_expires_at, status`,
+      [
+        offerId,
+        sessionId,
+        initiatorUserId,
+        recipientUserId,
+        placeId,
+        placeLabel,
+        createdAt,
+        respondBy,
+        locationExpiresAt
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    const row = rows[0];
+    return {
+      id: row.id,
+      sessionId: row.session_id,
+      initiatorUserId: row.initiator_user_id,
+      recipientUserId: row.recipient_user_id,
+      placeId: row.place_id,
+      placeLabel: row.place_label,
+      createdAt: row.created_at,
+      respondBy: row.respond_by,
+      locationExpiresAt: row.location_expires_at,
+      status: row.status
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
   }
-
-  if (candidate.rows[0].response !== "yes") {
-    throw new Error("Recipient has not opted in to meeting for this session");
-  }
-
-  await pool.query(
-    `UPDATE meetup_offers
-     SET status = 'expired'
-     WHERE session_id = $1 AND status = 'pending'`,
-    [sessionId]
-  );
-
-  const createdAt = now();
-  const respondBy = new Date(createdAt.getTime() + OFFER_RESPONSE_SECONDS * 1000);
-  const locationExpiresAt = new Date(createdAt.getTime() + LOCATION_EXPIRY_MINUTES * 60 * 1000);
-
-  const offerId = id("offer");
-  const { rows } = await pool.query(
-    `INSERT INTO meetup_offers (
-      id, session_id, initiator_user_id, recipient_user_id,
-      place_id, place_label, created_at, respond_by, location_expires_at, status
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')
-    RETURNING id, session_id, initiator_user_id, recipient_user_id,
-              place_id, place_label, created_at, respond_by, location_expires_at, status`,
-    [
-      offerId,
-      sessionId,
-      initiatorUserId,
-      recipientUserId,
-      placeId,
-      placeLabel,
-      createdAt,
-      respondBy,
-      locationExpiresAt
-    ]
-  );
-
-  const row = rows[0];
-  return {
-    id: row.id,
-    sessionId: row.session_id,
-    initiatorUserId: row.initiator_user_id,
-    recipientUserId: row.recipient_user_id,
-    placeId: row.place_id,
-    placeLabel: row.place_label,
-    createdAt: row.created_at,
-    respondBy: row.respond_by,
-    locationExpiresAt: row.location_expires_at,
-    status: row.status
-  };
 }
 
 export async function respondToOffer(offerId: string, recipientUserId: string, accept: boolean) {
-  const offerRes = await pool.query(
-    `SELECT id, session_id, initiator_user_id, recipient_user_id,
-            place_id, place_label, created_at, respond_by, location_expires_at, status
-     FROM meetup_offers
-     WHERE id = $1`,
-    [offerId]
-  );
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`offer:${offerId}`]);
 
-  if (offerRes.rowCount === 0) {
-    throw new Error("Offer not found");
-  }
+    const offerRes = await client.query(
+      `SELECT id, session_id, initiator_user_id, recipient_user_id,
+              place_id, place_label, created_at, respond_by, location_expires_at, status
+       FROM meetup_offers
+       WHERE id = $1
+       FOR UPDATE`,
+      [offerId]
+    );
 
-  const offer = offerRes.rows[0];
+    if (offerRes.rowCount === 0) {
+      throw new Error("Offer not found");
+    }
 
-  if (offer.recipient_user_id !== recipientUserId) {
-    throw new Error("Only selected recipient can respond");
-  }
+    const offer = offerRes.rows[0];
 
-  const rightNow = now();
-  if (offer.status !== "pending") {
-    throw new Error("Offer is no longer pending");
-  }
+    if (offer.recipient_user_id !== recipientUserId) {
+      throw new Error("Only selected recipient can respond");
+    }
 
-  if (rightNow > new Date(offer.respond_by)) {
-    await pool.query(`UPDATE meetup_offers SET status = 'expired' WHERE id = $1`, [offerId]);
-    throw new Error("Offer response window expired");
-  }
+    const rightNow = now();
+    if (offer.status !== "pending") {
+      throw new Error("Offer is no longer pending");
+    }
 
-  if (!accept) {
-    await pool.query(`UPDATE meetup_offers SET status = 'declined' WHERE id = $1`, [offerId]);
+    if (rightNow > new Date(offer.respond_by)) {
+      await client.query(`UPDATE meetup_offers SET status = 'expired' WHERE id = $1`, [offerId]);
+      throw new Error("Offer response window expired");
+    }
+
+    if (!accept) {
+      await client.query(`UPDATE meetup_offers SET status = 'declined' WHERE id = $1`, [offerId]);
+      await client.query("COMMIT");
+      return {
+        offer: {
+          id: offer.id,
+          sessionId: offer.session_id,
+          initiatorUserId: offer.initiator_user_id,
+          recipientUserId: offer.recipient_user_id,
+          placeId: offer.place_id,
+          placeLabel: offer.place_label,
+          createdAt: offer.created_at,
+          respondBy: offer.respond_by,
+          locationExpiresAt: offer.location_expires_at,
+          status: "declined"
+        },
+        coordinationEndsAt: null
+      };
+    }
+
+    await client.query(`UPDATE meetup_offers SET status = 'accepted' WHERE id = $1`, [offerId]);
+
+    const coordinationEndsAt = new Date(
+      rightNow.getTime() + COORDINATION_WINDOW_MINUTES * 60 * 1000
+    );
+
+    await client.query(
+      `UPDATE matches
+       SET coordination_ends_at = $1
+       WHERE (user_a_id = $2 AND user_b_id = $3)
+          OR (user_a_id = $3 AND user_b_id = $2)`,
+      [coordinationEndsAt, offer.initiator_user_id, offer.recipient_user_id]
+    );
+    await client.query("COMMIT");
 
     return {
       offer: {
@@ -1154,76 +1251,63 @@ export async function respondToOffer(offerId: string, recipientUserId: string, a
         createdAt: offer.created_at,
         respondBy: offer.respond_by,
         locationExpiresAt: offer.location_expires_at,
-        status: "declined"
+        status: "accepted"
       },
-      coordinationEndsAt: null
+      coordinationEndsAt
     };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
   }
-
-  await pool.query(`UPDATE meetup_offers SET status = 'accepted' WHERE id = $1`, [offerId]);
-
-  const coordinationEndsAt = new Date(
-    rightNow.getTime() + COORDINATION_WINDOW_MINUTES * 60 * 1000
-  );
-
-  await pool.query(
-    `UPDATE matches
-     SET coordination_ends_at = $1
-     WHERE (user_a_id = $2 AND user_b_id = $3)
-        OR (user_a_id = $3 AND user_b_id = $2)`,
-    [coordinationEndsAt, offer.initiator_user_id, offer.recipient_user_id]
-  );
-
-  return {
-    offer: {
-      id: offer.id,
-      sessionId: offer.session_id,
-      initiatorUserId: offer.initiator_user_id,
-      recipientUserId: offer.recipient_user_id,
-      placeId: offer.place_id,
-      placeLabel: offer.place_label,
-      createdAt: offer.created_at,
-      respondBy: offer.respond_by,
-      locationExpiresAt: offer.location_expires_at,
-      status: "accepted"
-    },
-    coordinationEndsAt
-  };
 }
 
 export async function expireLocationIfNeeded(offerId: string) {
-  const { rows } = await pool.query(
-    `SELECT id, session_id, initiator_user_id, recipient_user_id,
-            place_id, place_label, created_at, respond_by, location_expires_at, status
-     FROM meetup_offers
-     WHERE id = $1`,
-    [offerId]
-  );
-
-  if (!rows[0]) {
-    throw new Error("Offer not found");
-  }
-
-  const offer = rows[0];
-
-  if (offer.status === "accepted" && now() > new Date(offer.location_expires_at)) {
-    await pool.query(
-      `UPDATE meetup_offers SET status = 'location_expired' WHERE id = $1`,
+  const client = await pool.connect();
+  let offer: Record<string, unknown>;
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `SELECT id, session_id, initiator_user_id, recipient_user_id,
+              place_id, place_label, created_at, respond_by, location_expires_at, status
+       FROM meetup_offers
+       WHERE id = $1
+       FOR UPDATE`,
       [offerId]
     );
-    offer.status = "location_expired";
+
+    if (!rows[0]) {
+      throw new Error("Offer not found");
+    }
+
+    offer = rows[0];
+
+    if (offer.status === "accepted" && now() > new Date(String(offer.location_expires_at))) {
+      await client.query(
+        `UPDATE meetup_offers SET status = 'location_expired' WHERE id = $1`,
+        [offerId]
+      );
+      offer.status = "location_expired";
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
   }
 
   return {
-    id: offer.id,
-    sessionId: offer.session_id,
-    initiatorUserId: offer.initiator_user_id,
-    recipientUserId: offer.recipient_user_id,
-    placeId: offer.place_id,
-    placeLabel: offer.place_label,
-    createdAt: offer.created_at,
-    respondBy: offer.respond_by,
-    locationExpiresAt: offer.location_expires_at,
-    status: offer.status
+    id: String(offer.id),
+    sessionId: String(offer.session_id),
+    initiatorUserId: String(offer.initiator_user_id),
+    recipientUserId: String(offer.recipient_user_id),
+    placeId: String(offer.place_id),
+    placeLabel: String(offer.place_label),
+    createdAt: String(offer.created_at),
+    respondBy: String(offer.respond_by),
+    locationExpiresAt: String(offer.location_expires_at),
+    status: String(offer.status)
   };
 }

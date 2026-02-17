@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import { randomBytes, scryptSync } from "node:crypto";
+import { runMigrations } from "./migrations.js";
 
 const databaseUrl = process.env.DATABASE_URL?.trim();
 if (process.env.RAILWAY_SERVICE_ID && (!databaseUrl || databaseUrl.length === 0)) {
@@ -461,4 +462,6 @@ export async function initDb() {
           OR (user_a_id = 'u4' AND user_b_id = 'u_admin')
      )`
   );
+
+  await runMigrations(pool);
 }

@@ -27,6 +27,7 @@ cd "/Users/hunterbedwell/Documents/Twitch bot/backend"
 npm install
 export DATABASE_URL="postgresql://postgres:<YOUR_PASSWORD>@localhost:5432/vicino"
 export ADMIN_REVIEW_KEY="<YOUR_ADMIN_REVIEW_KEY>"
+npm run migrate
 npm run dev
 ```
 

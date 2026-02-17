@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "sh -c 'set -a; [ -f .env ] && . ./.env; set +a; tsx watch src/server.ts'",
+    "migrate": "sh -c 'set -a; [ -f .env ] && . ./.env; set +a; tsx src/migrate.ts'",
     "build": "tsc -p tsconfig.json",
     "start": "sh -c 'set -a; [ -f .env ] && . ./.env; set +a; node dist/server.js'"
   },
