@@ -162,6 +162,13 @@ export async function initDb() {
       is_admin BOOLEAN NOT NULL DEFAULT FALSE,
       email TEXT NULL UNIQUE,
       phone TEXT NULL UNIQUE,
+      terms_accepted_at TIMESTAMPTZ NULL,
+      privacy_accepted_at TIMESTAMPTZ NULL,
+      policy_version TEXT NULL,
+      marketing_consent BOOLEAN NOT NULL DEFAULT FALSE,
+      is_banned BOOLEAN NOT NULL DEFAULT FALSE,
+      banned_reason TEXT NULL,
+      banned_at TIMESTAMPTZ NULL,
       age INT NOT NULL,
       gender TEXT NOT NULL,
       preferred_gender TEXT NULL,
@@ -197,6 +204,13 @@ export async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT NOT NULL DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT NULL;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ NULL;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_accepted_at TIMESTAMPTZ NULL;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS policy_version TEXT NULL;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS marketing_consent BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_reason TEXT NULL;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_at TIMESTAMPTZ NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_gender TEXT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS likes TEXT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS dislikes TEXT NULL;

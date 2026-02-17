@@ -112,7 +112,11 @@ app.post("/auth/register", async (req, res) => {
       .min(3)
       .max(24)
       .regex(/^[a-zA-Z0-9_]+$/),
-    password: z.string().min(8).max(200)
+    password: z.string().min(8).max(200),
+    acceptedTerms: z.literal(true),
+    acceptedPrivacy: z.literal(true),
+    marketingConsent: z.boolean().optional().default(false),
+    policyVersion: z.string().min(1).max(40)
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {

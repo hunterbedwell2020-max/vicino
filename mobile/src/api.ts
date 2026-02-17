@@ -179,6 +179,10 @@ export function postRegister(payload: {
   email: string;
   username: string;
   password: string;
+  acceptedTerms: true;
+  acceptedPrivacy: true;
+  marketingConsent?: boolean;
+  policyVersion: string;
 }) {
   return request<AuthResponse>("/auth/register", {
     method: "POST",

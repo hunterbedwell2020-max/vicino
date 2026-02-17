@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import {
   getAuthSession,
@@ -12,6 +12,57 @@ import {
   type VerificationStatus
 } from "../api";
 import { theme } from "../theme";
+
+const POLICY_VERSION = "v1.0";
+const TERMS_TEXT = `Vicino Terms of Service (Draft)
+
+1) Eligibility
+- You must be 18+ to use Vicino.
+- You must provide accurate information and complete identity verification.
+
+2) Safety and Conduct
+- Harassment, threats, hate, impersonation, and fraud are prohibited.
+- Do not solicit private home meetups through Vicino.
+- Public-meetup safety rules must be followed.
+
+3) Content and Moderation
+- You are responsible for your profile content and messages.
+- Vicino may review, remove content, suspend, or ban accounts for policy violations.
+
+4) Liability
+- You are responsible for your choices and in-person interactions.
+- Vicino provides a platform and does not guarantee user behavior.
+
+5) Enforcement
+- Violations may lead to temporary or permanent bans.
+- Appeals may be reviewed at Vicino's discretion.
+
+By creating an account, you agree to these terms.`;
+
+const PRIVACY_TEXT = `Vicino Privacy Policy (Draft)
+
+What we collect:
+- Account data (email, username, profile fields)
+- Verification data (selfie/ID images)
+- Location and distance preferences
+- App activity (matches, messages, meetup decisions)
+
+How we use data:
+- Operate the app and safety workflows
+- Fraud prevention, moderation, abuse prevention
+- Product improvement and analytics
+
+Sharing:
+- We may use service providers (hosting, storage, analytics, verification tools).
+- We do not sell personal data.
+
+Retention:
+- Data may be retained for legal, safety, and operational needs.
+
+Your rights:
+- You can request account/data deletion where applicable.
+
+By creating an account, you acknowledge this policy.`;
 
 interface OnboardingScreenProps {
   currentUser: ApiUser | null;
@@ -34,6 +85,11 @@ export function OnboardingScreen({
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [acceptedPrivacy, setAcceptedPrivacy] = useState(false);
+  const [marketingConsent, setMarketingConsent] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
+  const [showPrivacy, setShowPrivacy] = useState(false);
 
   const [selfieUri, setSelfieUri] = useState("");
   const [licenseUri, setLicenseUri] = useState("");
@@ -48,12 +104,20 @@ export function OnboardingScreen({
     setError(null);
     setSuccess(null);
     try {
+      if (mode === "signup" && (!acceptedTerms || !acceptedPrivacy)) {
+        setError("You must accept Terms and Privacy Policy to create an account.");
+        return;
+      }
       const result =
         mode === "signup"
           ? await postRegister({
               email: email.trim(),
               username: username.trim().toLowerCase(),
-              password
+              password,
+              acceptedTerms: true,
+              acceptedPrivacy: true,
+              marketingConsent,
+              policyVersion: POLICY_VERSION
             })
           : await postLogin({
               username: username.trim().toLowerCase(),
@@ -193,6 +257,41 @@ export function OnboardingScreen({
             placeholder="Password"
             placeholderTextColor={theme.colors.muted}
           />
+          {mode === "signup" ? (
+            <>
+              <Pressable style={styles.consentRow} onPress={() => setAcceptedTerms((prev) => !prev)}>
+                <View style={[styles.checkbox, acceptedTerms && styles.checkboxOn]}>
+                  <Text style={styles.checkboxTick}>{acceptedTerms ? "✓" : ""}</Text>
+                </View>
+                <Text style={styles.consentText}>
+                  I agree to{" "}
+                  <Text style={styles.consentLink} onPress={() => setShowTerms(true)}>
+                    Terms of Service
+                  </Text>
+                  .
+                </Text>
+              </Pressable>
+              <Pressable style={styles.consentRow} onPress={() => setAcceptedPrivacy((prev) => !prev)}>
+                <View style={[styles.checkbox, acceptedPrivacy && styles.checkboxOn]}>
+                  <Text style={styles.checkboxTick}>{acceptedPrivacy ? "✓" : ""}</Text>
+                </View>
+                <Text style={styles.consentText}>
+                  I agree to{" "}
+                  <Text style={styles.consentLink} onPress={() => setShowPrivacy(true)}>
+                    Privacy Policy
+                  </Text>
+                  .
+                </Text>
+              </Pressable>
+              <Pressable style={styles.consentRow} onPress={() => setMarketingConsent((prev) => !prev)}>
+                <View style={[styles.checkbox, marketingConsent && styles.checkboxOn]}>
+                  <Text style={styles.checkboxTick}>{marketingConsent ? "✓" : ""}</Text>
+                </View>
+                <Text style={styles.consentText}>I agree to optional product updates and announcements.</Text>
+              </Pressable>
+              <Text style={styles.helper}>Policy version: {POLICY_VERSION}</Text>
+            </>
+          ) : null}
           <Pressable style={styles.btn} onPress={() => void auth()} disabled={loading}>
             <Text style={styles.btnText}>{mode === "signup" ? "Create Account" : "Log In"}</Text>
           </Pressable>
@@ -242,6 +341,34 @@ export function OnboardingScreen({
 
       {success ? <Text style={styles.success}>{success}</Text> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      <Modal visible={showTerms} animationType="slide">
+        <View style={styles.modalWrap}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Terms of Service</Text>
+            <Pressable onPress={() => setShowTerms(false)}>
+              <Text style={styles.modalClose}>Close</Text>
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.modalBody}>
+            <Text style={styles.modalText}>{TERMS_TEXT}</Text>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      <Modal visible={showPrivacy} animationType="slide">
+        <View style={styles.modalWrap}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Privacy Policy</Text>
+            <Pressable onPress={() => setShowPrivacy(false)}>
+              <Text style={styles.modalClose}>Close</Text>
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.modalBody}>
+            <Text style={styles.modalText}>{PRIVACY_TEXT}</Text>
+          </ScrollView>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -306,6 +433,39 @@ const styles = StyleSheet.create({
     color: theme.colors.muted,
     fontSize: 12
   },
+  consentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: "#B7A1D8",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#fff"
+  },
+  checkboxOn: {
+    backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primary
+  },
+  checkboxTick: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 12
+  },
+  consentText: {
+    color: theme.colors.text,
+    flex: 1,
+    lineHeight: 18
+  },
+  consentLink: {
+    color: theme.colors.primary,
+    fontWeight: "700"
+  },
   btn: {
     backgroundColor: theme.colors.primary,
     borderRadius: theme.radius.sm,
@@ -342,5 +502,34 @@ const styles = StyleSheet.create({
     color: "#B42318",
     fontWeight: "700",
     textAlign: "center"
+  },
+  modalWrap: {
+    flex: 1,
+    backgroundColor: theme.colors.background
+  },
+  modalHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 56,
+    paddingBottom: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center"
+  },
+  modalTitle: {
+    color: theme.colors.text,
+    fontSize: 18,
+    fontWeight: "800"
+  },
+  modalClose: {
+    color: theme.colors.primary,
+    fontWeight: "700"
+  },
+  modalBody: {
+    paddingHorizontal: 16,
+    paddingBottom: 24
+  },
+  modalText: {
+    color: theme.colors.text,
+    lineHeight: 20
   }
 });

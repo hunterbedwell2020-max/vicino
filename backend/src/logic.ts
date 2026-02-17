@@ -53,6 +53,7 @@ function mapUser(row: Record<string, unknown>) {
     isAdmin: Boolean(row.is_admin),
     email: row.email ? String(row.email) : null,
     phone: row.phone ? String(row.phone) : null,
+    isBanned: Boolean(row.is_banned),
     age: Number(row.age),
     gender: String(row.gender),
     preferredGender: row.preferred_gender ? String(row.preferred_gender) : null,
@@ -70,8 +71,15 @@ function mapUser(row: Record<string, unknown>) {
   };
 }
 
+function ensureNotBanned(row: Record<string, unknown>) {
+  if (Boolean(row.is_banned)) {
+    throw new Error("Account is suspended. Contact support for review.");
+  }
+}
+
 async function getUser(userId: string) {
   const user = await getUserAny(userId);
+  ensureNotBanned(user);
   if (!user.verified) {
     throw new Error("User must be ID verified");
   }
@@ -83,7 +91,7 @@ async function getUser(userId: string) {
 
 async function getUserAny(userId: string) {
   const { rows } = await pool.query(
-    `SELECT id, first_name, last_name, username, password_hash, is_admin, email, phone, age, gender, preferred_gender, likes, dislikes, bio, profile_photo_url, verified, photos,
+    `SELECT id, first_name, last_name, username, password_hash, is_admin, email, phone, is_banned, age, gender, preferred_gender, likes, dislikes, bio, profile_photo_url, verified, photos,
             hobbies, prompt_one, prompt_two, prompt_three,
             latitude, longitude, max_distance_miles,
             verification_status, verification_submitted_at,
@@ -156,7 +164,7 @@ function isPublicPlaceId(placeId: string) {
 
 export async function listUsers() {
   const { rows } = await pool.query(
-    `SELECT id, first_name, last_name, username, is_admin, email, phone, age, gender,
+    `SELECT id, first_name, last_name, username, is_admin, email, phone, is_banned, age, gender,
             preferred_gender, likes, dislikes, bio, profile_photo_url, verified, photos,
             hobbies, prompt_one, prompt_two, prompt_three,
             latitude, longitude, max_distance_miles
@@ -170,6 +178,10 @@ export async function registerAuthUser(input: {
   email: string;
   username: string;
   password: string;
+  acceptedTerms: boolean;
+  acceptedPrivacy: boolean;
+  marketingConsent?: boolean;
+  policyVersion: string;
 }) {
   const username = input.username.trim().toLowerCase();
   if (!/^[a-z0-9_]{3,24}$/.test(username)) {
@@ -179,6 +191,9 @@ export async function registerAuthUser(input: {
   if (input.password.length < 8) {
     throw new Error("Password must be at least 8 characters.");
   }
+  if (!input.acceptedTerms || !input.acceptedPrivacy) {
+    throw new Error("You must accept the Terms and Privacy Policy to create an account.");
+  }
 
   const passwordHash = hashPassword(input.password);
   const userId = id("u");
@@ -186,12 +201,22 @@ export async function registerAuthUser(input: {
     const { rows } = await pool.query(
       `INSERT INTO users (
         id, first_name, last_name, username, password_hash, email, age, gender,
+        terms_accepted_at, privacy_accepted_at, policy_version, marketing_consent,
         bio, verified, verification_status, photos, hobbies, max_distance_miles
       )
-      VALUES ($1, $2, $3, $4, $5, $6, 18, 'other', '', FALSE, 'unsubmitted', '[]'::jsonb, ARRAY[]::text[], 25)
+      VALUES ($1, $2, $3, $4, $5, $6, 18, 'other', NOW(), NOW(), $7, $8, '', FALSE, 'unsubmitted', '[]'::jsonb, ARRAY[]::text[], 25)
       RETURNING id, first_name, last_name, username, is_admin, email, phone, age, gender, preferred_gender, likes, dislikes,
-                bio, verified, photos, hobbies, prompt_one, prompt_two, prompt_three, max_distance_miles`,
-      [userId, username, "", username, passwordHash, input.email.trim().toLowerCase()]
+                bio, verified, photos, hobbies, prompt_one, prompt_two, prompt_three, max_distance_miles, is_banned`,
+      [
+        userId,
+        username,
+        "",
+        username,
+        passwordHash,
+        input.email.trim().toLowerCase(),
+        input.policyVersion.trim(),
+        Boolean(input.marketingConsent)
+      ]
     );
 
     const token = randomBytes(32).toString("hex");
@@ -214,7 +239,7 @@ export async function registerAuthUser(input: {
 export async function loginAuthUser(username: string, password: string) {
   const normalized = username.trim().toLowerCase();
   const { rows } = await pool.query(
-    `SELECT id, first_name, last_name, username, password_hash, is_admin, email, phone, age, gender, preferred_gender, likes, dislikes,
+    `SELECT id, first_name, last_name, username, password_hash, is_admin, email, phone, is_banned, age, gender, preferred_gender, likes, dislikes,
             bio, profile_photo_url, verified, photos, hobbies, prompt_one, prompt_two, prompt_three, max_distance_miles
      FROM users
      WHERE username = $1`,
@@ -225,6 +250,7 @@ export async function loginAuthUser(username: string, password: string) {
     throw new Error("Invalid username or password.");
   }
   const user = rows[0];
+  ensureNotBanned(user);
   if (!user.password_hash || !verifyPassword(password, String(user.password_hash))) {
     throw new Error("Invalid username or password.");
   }
@@ -241,7 +267,7 @@ export async function loginAuthUser(username: string, password: string) {
 
 export async function getAuthSession(token: string) {
   const { rows } = await pool.query(
-    `SELECT u.id, u.first_name, u.last_name, u.username, u.is_admin, u.email, u.phone, u.age, u.gender, u.preferred_gender, u.likes, u.dislikes,
+    `SELECT u.id, u.first_name, u.last_name, u.username, u.is_admin, u.email, u.phone, u.is_banned, u.age, u.gender, u.preferred_gender, u.likes, u.dislikes,
             u.bio, u.profile_photo_url, u.verified, u.photos, u.hobbies, u.prompt_one, u.prompt_two, u.prompt_three, u.max_distance_miles,
             u.verification_status, u.verification_submitted_at, u.verification_reviewed_at, u.verification_reviewer_note
      FROM auth_sessions s
@@ -253,6 +279,7 @@ export async function getAuthSession(token: string) {
     throw new Error("Session expired. Please sign in again.");
   }
   const row = rows[0];
+  ensureNotBanned(row);
   return {
     token,
     user: mapUser(row),
