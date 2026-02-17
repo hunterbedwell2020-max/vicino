@@ -30,6 +30,7 @@ export function AdminScreen({ authToken }: { authToken: string }) {
     setError(null);
     try {
       await postReviewVerification(submissionId, decision, "hunterbedwell", authToken);
+      setSelected(null);
       await loadQueue();
     } catch (err) {
       setError((err as Error).message);
