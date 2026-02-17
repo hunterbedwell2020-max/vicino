@@ -29,6 +29,10 @@ type DbSession = {
   active: boolean;
 };
 
+type Queryable = {
+  query: (text: string, params?: unknown[]) => Promise<{ rows: Record<string, unknown>[]; rowCount: number | null }>;
+};
+
 function hashPassword(password: string) {
   const salt = randomBytes(16).toString("hex");
   const hash = scryptSync(password, salt, 64).toString("hex");
@@ -91,6 +95,28 @@ function mapVerification(row: Record<string, unknown>) {
     reviewedAt: row.verification_reviewed_at ? String(row.verification_reviewed_at) : null,
     reviewerNote: row.verification_reviewer_note ? String(row.verification_reviewer_note) : null
   };
+}
+
+async function logAdminAction(
+  db: Queryable,
+  input: {
+    adminUserId: string;
+    action: string;
+    targetUserId?: string | null;
+    metadata?: Record<string, unknown>;
+  }
+) {
+  await db.query(
+    `INSERT INTO admin_audit_logs (id, admin_user_id, action, target_user_id, metadata, created_at)
+     VALUES ($1, $2, $3, $4, $5::jsonb, NOW())`,
+    [
+      id("audit"),
+      input.adminUserId,
+      input.action,
+      input.targetUserId ?? null,
+      JSON.stringify(input.metadata ?? {})
+    ]
+  );
 }
 
 async function createAuthTokensForUser(user: Record<string, unknown>) {
@@ -656,6 +682,7 @@ export async function listVerificationQueue(
       vs.selfie_uri AS "selfieUri",
       vs.id_document_type AS "idDocumentType",
       vs.status,
+      u.is_banned AS "isBanned",
       vs.submitted_at AS "submittedAt",
       vs.reviewer_id AS "reviewerId",
       vs.reviewer_note AS "reviewerNote",
@@ -678,43 +705,163 @@ export async function reviewVerificationSubmission(
   reviewerId: string,
   reviewerNote?: string
 ) {
-  const submissionRes = await pool.query(
-    `SELECT id, user_id
-     FROM verification_submissions
-     WHERE id = $1`,
-    [submissionId]
-  );
-  if (submissionRes.rowCount === 0) {
-    throw new Error("Verification submission not found");
+  const client = await pool.connect();
+  let userId = "";
+  try {
+    await client.query("BEGIN");
+    const submissionRes = await client.query(
+      `SELECT id, user_id
+       FROM verification_submissions
+       WHERE id = $1
+       FOR UPDATE`,
+      [submissionId]
+    );
+    if (submissionRes.rowCount === 0) {
+      throw new Error("Verification submission not found");
+    }
+
+    userId = String(submissionRes.rows[0].user_id);
+
+    await client.query(
+      `UPDATE verification_submissions
+       SET status = $2,
+           reviewer_id = $3,
+           reviewer_note = $4,
+           reviewed_at = NOW()
+       WHERE id = $1`,
+      [submissionId, decision, reviewerId, reviewerNote ?? null]
+    );
+
+    await client.query(
+      `UPDATE users
+       SET verified = $2,
+           verification_status = $3,
+           verification_reviewed_at = NOW(),
+           verification_reviewer_note = $4
+       WHERE id = $1`,
+      [userId, decision === "approved", decision, reviewerNote ?? null]
+    );
+
+    await logAdminAction(client as unknown as Queryable, {
+      adminUserId: reviewerId,
+      action: "verification_review",
+      targetUserId: userId,
+      metadata: {
+        submissionId,
+        decision,
+        reviewerNote: reviewerNote ?? null
+      }
+    });
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
   }
-
-  const userId = submissionRes.rows[0].user_id as string;
-
-  await pool.query(
-    `UPDATE verification_submissions
-     SET status = $2,
-         reviewer_id = $3,
-         reviewer_note = $4,
-         reviewed_at = NOW()
-     WHERE id = $1`,
-    [submissionId, decision, reviewerId, reviewerNote ?? null]
-  );
-
-  await pool.query(
-    `UPDATE users
-     SET verified = $2,
-         verification_status = $3,
-         verification_reviewed_at = NOW(),
-         verification_reviewer_note = $4
-     WHERE id = $1`,
-    [userId, decision === "approved", decision, reviewerNote ?? null]
-  );
 
   return {
     submissionId,
     userId,
     decision
   };
+}
+
+export async function banUserByAdmin(adminUserId: string, targetUserId: string, reason?: string) {
+  if (adminUserId === targetUserId) {
+    throw new Error("Admin cannot ban own account.");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const target = await client.query(
+      `SELECT id, is_banned
+       FROM users
+       WHERE id = $1
+       FOR UPDATE`,
+      [targetUserId]
+    );
+    if (target.rowCount === 0) {
+      throw new Error("Target user not found.");
+    }
+
+    await client.query(
+      `UPDATE users
+       SET is_banned = TRUE,
+           banned_reason = $2,
+           banned_at = NOW()
+       WHERE id = $1`,
+      [targetUserId, reason?.trim() || "Admin moderation action"]
+    );
+
+    await client.query(
+      `UPDATE auth_refresh_sessions
+       SET revoked_at = NOW()
+       WHERE user_id = $1
+         AND revoked_at IS NULL`,
+      [targetUserId]
+    );
+
+    await logAdminAction(client as unknown as Queryable, {
+      adminUserId,
+      action: "user_ban",
+      targetUserId,
+      metadata: {
+        reason: reason?.trim() || null
+      }
+    });
+
+    await client.query("COMMIT");
+    return { ok: true as const, userId: targetUserId, isBanned: true };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function unbanUserByAdmin(adminUserId: string, targetUserId: string) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const target = await client.query(
+      `SELECT id
+       FROM users
+       WHERE id = $1
+       FOR UPDATE`,
+      [targetUserId]
+    );
+    if (target.rowCount === 0) {
+      throw new Error("Target user not found.");
+    }
+
+    await client.query(
+      `UPDATE users
+       SET is_banned = FALSE,
+           banned_reason = NULL,
+           banned_at = NULL
+       WHERE id = $1`,
+      [targetUserId]
+    );
+
+    await logAdminAction(client as unknown as Queryable, {
+      adminUserId,
+      action: "user_unban",
+      targetUserId,
+      metadata: {}
+    });
+
+    await client.query("COMMIT");
+    return { ok: true as const, userId: targetUserId, isBanned: false };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export async function listMatches(userId?: string, options?: { limit?: number; offset?: number }) {

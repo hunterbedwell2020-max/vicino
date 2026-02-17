@@ -141,6 +141,7 @@ export interface VerificationSubmission {
   idDocumentUri: string;
   selfieUri: string;
   idDocumentType: string;
+  isBanned?: boolean;
   status: "pending" | "approved" | "rejected";
   submittedAt: string;
   reviewerId: string | null;
@@ -422,7 +423,6 @@ export function getVerificationQueue(
 export function postReviewVerification(
   submissionId: string,
   decision: "approved" | "rejected",
-  reviewerId: string,
   authToken?: string,
   adminKey?: string,
   reviewerNote?: string
@@ -435,7 +435,34 @@ export function postReviewVerification(
         ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
         ...(adminKey ? { "x-admin-key": adminKey } : {})
       },
-      body: JSON.stringify({ decision, reviewerId, reviewerNote })
+      body: JSON.stringify({ decision, reviewerNote })
     }
   );
+}
+
+export function postAdminBanUser(
+  userId: string,
+  reason: string,
+  authToken?: string,
+  adminKey?: string
+) {
+  return request<{ ok: boolean; userId: string; isBanned: boolean }>(`/admin/users/${userId}/ban`, {
+    method: "POST",
+    headers: {
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      ...(adminKey ? { "X-Admin-Key": adminKey } : {})
+    },
+    body: JSON.stringify({ reason })
+  });
+}
+
+export function postAdminUnbanUser(userId: string, authToken?: string, adminKey?: string) {
+  return request<{ ok: boolean; userId: string; isBanned: boolean }>(`/admin/users/${userId}/unban`, {
+    method: "POST",
+    headers: {
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      ...(adminKey ? { "X-Admin-Key": adminKey } : {})
+    },
+    body: JSON.stringify({})
+  });
 }

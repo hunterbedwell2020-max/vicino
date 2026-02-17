@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { getVerificationQueue, postReviewVerification, type VerificationSubmission } from "../api";
+import {
+  getVerificationQueue,
+  postAdminBanUser,
+  postAdminUnbanUser,
+  postReviewVerification,
+  type VerificationSubmission
+} from "../api";
 import { theme } from "../theme";
 
 export function AdminScreen({ authToken }: { authToken: string }) {
@@ -29,9 +35,31 @@ export function AdminScreen({ authToken }: { authToken: string }) {
   const review = async (submissionId: string, decision: "approved" | "rejected") => {
     setError(null);
     try {
-      await postReviewVerification(submissionId, decision, "hunterbedwell", authToken);
+      await postReviewVerification(submissionId, decision, authToken);
       setSelected(null);
       await loadQueue();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  const setBanState = async (item: VerificationSubmission, nextBanned: boolean) => {
+    setError(null);
+    try {
+      if (nextBanned) {
+        await postAdminBanUser(item.userId, "Admin moderation", authToken);
+      } else {
+        await postAdminUnbanUser(item.userId, authToken);
+      }
+      await loadQueue();
+      setSelected((prev) =>
+        prev && prev.id === item.id
+          ? {
+              ...prev,
+              isBanned: nextBanned
+            }
+          : prev
+      );
     } catch (err) {
       setError((err as Error).message);
     }
@@ -68,6 +96,9 @@ export function AdminScreen({ authToken }: { authToken: string }) {
           <Text style={styles.meta}>
             Age {selected.age} • {selected.gender}
           </Text>
+          <Text style={[styles.meta, selected.isBanned ? styles.bannedMeta : null]}>
+            Status: {selected.isBanned ? "Banned" : "Active"}
+          </Text>
 
           <Text style={styles.imageLabel}>Selfie</Text>
           <Image source={{ uri: selected.selfieUri }} style={styles.image} resizeMode="cover" />
@@ -81,6 +112,23 @@ export function AdminScreen({ authToken }: { authToken: string }) {
             <Pressable style={styles.rejectBtn} onPress={() => void review(selected.id, "rejected")}>
               <Text style={styles.btnText}>Reject</Text>
             </Pressable>
+          </View>
+          <View style={styles.row}>
+            {selected.isBanned ? (
+              <Pressable
+                style={styles.unbanBtn}
+                onPress={() => void setBanState(selected, false)}
+              >
+                <Text style={styles.btnText}>Unban User</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                style={styles.banBtn}
+                onPress={() => void setBanState(selected, true)}
+              >
+                <Text style={styles.btnText}>Ban User</Text>
+              </Pressable>
+            )}
           </View>
           <Pressable style={styles.closeBtn} onPress={() => setSelected(null)}>
             <Text style={styles.closeText}>Close</Text>
@@ -98,6 +146,10 @@ const styles = StyleSheet.create({
   wrap: {
     gap: 12,
     paddingBottom: 16
+  },
+  bannedMeta: {
+    color: "#B42318",
+    fontWeight: "700"
   },
   card: {
     backgroundColor: theme.colors.card,
@@ -177,6 +229,20 @@ const styles = StyleSheet.create({
   rejectBtn: {
     flex: 1,
     backgroundColor: "#B42318",
+    borderRadius: theme.radius.sm,
+    paddingVertical: 10,
+    alignItems: "center"
+  },
+  banBtn: {
+    flex: 1,
+    backgroundColor: "#B42318",
+    borderRadius: theme.radius.sm,
+    paddingVertical: 10,
+    alignItems: "center"
+  },
+  unbanBtn: {
+    flex: 1,
+    backgroundColor: "#087F5B",
     borderRadius: theme.radius.sm,
     paddingVertical: 10,
     alignItems: "center"

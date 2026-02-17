@@ -247,24 +247,8 @@ export function useVicinoState(currentUserId: string | null) {
         return refreshFromApi();
       })
       .catch(() => {
-        if (decision === "right") {
-          setMatches((prev) => [
-            {
-              id: `m_${current.id}`,
-              name: current.name,
-              avatarUrl:
-                usersById[current.id]?.profilePhotoUrl ??
-                current.photos[0] ??
-                null,
-              messagesUsedByMe: 0,
-              messagesUsedByThem: 0,
-              meetDecisionByMe: null,
-              meetDecisionByThem: null,
-              chat: []
-            },
-            ...prev
-          ]);
-        }
+        // If swipe write fails, put the card back so user can retry.
+        setDeck((prev) => [current, ...prev]);
       });
   };
 

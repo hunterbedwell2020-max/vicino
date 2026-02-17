@@ -8,6 +8,7 @@ import { initDb, pool } from "./db.js";
 import {
   assertVerifiedUser,
   assertAdminSession,
+  banUserByAdmin,
   closeAvailability,
   createMeetupOffer,
   expireLocationIfNeeded,
@@ -32,6 +33,7 @@ import {
   setMeetDecision,
   startAvailability,
   submitVerification,
+  unbanUserByAdmin,
   updateUserProfile,
   updateUserDistancePreference,
   updateUserLocation,
@@ -104,6 +106,15 @@ const requireAdminAccess: express.RequestHandler = async (req, res, next) => {
     return res.status(401).json({ error: "Unauthorized admin access." });
   }
   return next();
+};
+
+const resolveAdminActorId = async (req: express.Request) => {
+  const token = String(req.header("authorization") ?? "").replace(/^Bearer\s+/i, "");
+  if (!token) {
+    return "u_admin";
+  }
+  const session = await assertAdminSession(token);
+  return String(session.user.id);
 };
 
 app.get("/health", (_req, res) => {
@@ -303,7 +314,6 @@ app.get("/admin/verifications", adminRateLimit, requireAdminAccess, async (req, 
 app.post("/admin/verifications/:submissionId/review", adminRateLimit, requireAdminAccess, async (req, res) => {
   const schema = z.object({
     decision: z.enum(["approved", "rejected"]),
-    reviewerId: z.string(),
     reviewerNote: z.string().optional()
   });
   const parsed = schema.safeParse(req.body);
@@ -313,12 +323,41 @@ app.post("/admin/verifications/:submissionId/review", adminRateLimit, requireAdm
 
   try {
     const submissionId = String(req.params.submissionId);
+    const adminUserId = await resolveAdminActorId(req);
     const result = await reviewVerificationSubmission(
       submissionId,
       parsed.data.decision,
-      parsed.data.reviewerId,
+      adminUserId,
       parsed.data.reviewerNote
     );
+    return res.json(result);
+  } catch (err) {
+    return res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/admin/users/:userId/ban", adminRateLimit, requireAdminAccess, async (req, res) => {
+  const schema = z.object({
+    reason: z.string().min(1).max(280).optional()
+  });
+  const parsed = schema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+
+  try {
+    const adminUserId = await resolveAdminActorId(req);
+    const result = await banUserByAdmin(adminUserId, String(req.params.userId), parsed.data.reason);
+    return res.json(result);
+  } catch (err) {
+    return res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/admin/users/:userId/unban", adminRateLimit, requireAdminAccess, async (req, res) => {
+  try {
+    const adminUserId = await resolveAdminActorId(req);
+    const result = await unbanUserByAdmin(adminUserId, String(req.params.userId));
     return res.json(result);
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });

@@ -318,6 +318,15 @@ export async function initDb() {
       revoked_at TIMESTAMPTZ NULL
     );
 
+    CREATE TABLE IF NOT EXISTS admin_audit_logs (
+      id TEXT PRIMARY KEY,
+      admin_user_id TEXT NOT NULL REFERENCES users(id),
+      action TEXT NOT NULL,
+      target_user_id TEXT NULL REFERENCES users(id),
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE INDEX IF NOT EXISTS idx_matches_pair ON matches (user_a_id, user_b_id);
     CREATE INDEX IF NOT EXISTS idx_matches_user_a_created ON matches (user_a_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_matches_user_b_created ON matches (user_b_id, created_at DESC);
@@ -333,6 +342,8 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions (user_id);
     CREATE INDEX IF NOT EXISTS idx_auth_refresh_sessions_user ON auth_refresh_sessions (user_id);
     CREATE INDEX IF NOT EXISTS idx_auth_refresh_sessions_expires ON auth_refresh_sessions (expires_at);
+    CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_created ON admin_audit_logs (created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_target ON admin_audit_logs (target_user_id, created_at DESC);
   `);
 
   await pool.query(`
