@@ -59,11 +59,39 @@ export function MessagesScreen({
     return (
       <View style={styles.promptCard}>
         <View style={styles.promptRow}>
-          <Text style={styles.promptLabel}>Your answer: {activeMatch.meetDecisionByMe ?? "pending"}</Text>
+          <Text style={styles.promptLabel}>Your answer:</Text>
+          <View style={styles.promptActions}>
+            <Pressable
+              style={[styles.promptBtn, activeMatch.meetDecisionByMe === "yes" && styles.promptBtnYes]}
+              onPress={() => setMeetDecision(activeMatch.id, "me", "yes")}
+            >
+              <Text style={styles.promptBtnText}>Yes</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.promptBtn, activeMatch.meetDecisionByMe === "no" && styles.promptBtnNo]}
+              onPress={() => setMeetDecision(activeMatch.id, "me", "no")}
+            >
+              <Text style={styles.promptBtnText}>No</Text>
+            </Pressable>
+          </View>
         </View>
 
         <View style={styles.promptRow}>
-          <Text style={styles.promptLabel}>Their answer: {activeMatch.meetDecisionByThem ?? "pending"}</Text>
+          <Text style={styles.promptLabel}>Simulate their answer:</Text>
+          <View style={styles.promptActions}>
+            <Pressable
+              style={[styles.promptBtn, activeMatch.meetDecisionByThem === "yes" && styles.promptBtnYes]}
+              onPress={() => setMeetDecision(activeMatch.id, "them", "yes")}
+            >
+              <Text style={styles.promptBtnText}>Yes</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.promptBtn, activeMatch.meetDecisionByThem === "no" && styles.promptBtnNo]}
+              onPress={() => setMeetDecision(activeMatch.id, "them", "no")}
+            >
+              <Text style={styles.promptBtnText}>No</Text>
+            </Pressable>
+          </View>
         </View>
 
         <Text style={styles.promptStatus}>
@@ -75,7 +103,7 @@ export function MessagesScreen({
         </Text>
       </View>
     );
-  }, [activeMatch, capReached, bothMeetYes]);
+  }, [activeMatch, capReached, bothMeetYes, setMeetDecision]);
 
   const decisionModal = useMemo(() => {
     if (!activeMatch || !shouldForceDecision) {
@@ -274,7 +302,7 @@ export function MessagesScreen({
               onSubmitEditing={() => void sendMine()}
             />
             <Pressable style={styles.sendFab} onPress={() => void sendMine()}>
-              <Text style={styles.sendFabIcon}>➤</Text>
+              <Text style={styles.sendFabIcon}>✈</Text>
             </Pressable>
           </View>
           <View style={styles.composeActions}>
@@ -443,8 +471,8 @@ const styles = StyleSheet.create({
   },
   sendFabIcon: {
     color: "#fff",
-    fontSize: 18,
-    fontWeight: "800",
+    fontSize: 17,
+    fontWeight: "700",
     marginLeft: 1
   },
   composeActions: { flexDirection: "row", gap: 8 },
