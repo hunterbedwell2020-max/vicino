@@ -45,10 +45,6 @@ export function TabBar({
           ) : (
             <Text style={[styles.text, active === tab.key && styles.activeText]}>{tab.label}</Text>
           )}
-
-          {tab.key === "matches" ? (
-            <Text style={[styles.centerLabel, active === tab.key && styles.centerLabelActive]}>{tab.label}</Text>
-          ) : null}
         </Pressable>
       ))}
       {isAdmin ? (
@@ -64,14 +60,15 @@ const styles = StyleSheet.create({
   wrap: {
     flexDirection: "row",
     backgroundColor: theme.colors.card,
-    borderRadius: theme.radius.lg,
-    padding: 8,
+    borderRadius: theme.radius.md,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
     gap: 6
   },
   item: {
     flex: 1,
     borderRadius: theme.radius.md,
-    paddingVertical: 10,
+    paddingVertical: 7,
     alignItems: "center",
     justifyContent: "center"
   },
@@ -80,12 +77,13 @@ const styles = StyleSheet.create({
   },
   centerItem: {
     alignSelf: "flex-start",
-    marginTop: -22
+    marginTop: -18,
+    paddingVertical: 0
   },
   logoCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     backgroundColor: "#fff",
     borderWidth: 3,
     borderColor: "#EADCF8",
@@ -100,19 +98,10 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%"
   },
-  centerLabel: {
-    color: theme.colors.primary,
-    fontWeight: "700",
-    fontSize: 12,
-    marginTop: 4
-  },
-  centerLabelActive: {
-    color: theme.colors.primary
-  },
   text: {
     color: theme.colors.primary,
     fontWeight: "600",
-    fontSize: 12
+    fontSize: 11
   },
   activeText: {
     color: "#FFFFFF"
@@ -137,11 +126,11 @@ const styles = StyleSheet.create({
   adminPill: {
     position: "absolute",
     right: 8,
-    top: -14,
+    top: -12,
     backgroundColor: "#EDE7F6",
     borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4
+    paddingHorizontal: 8,
+    paddingVertical: 3
   },
   adminPillActive: {
     backgroundColor: theme.colors.primary
