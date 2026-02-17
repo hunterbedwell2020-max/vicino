@@ -168,6 +168,7 @@ export async function initDb() {
       likes TEXT NULL,
       dislikes TEXT NULL,
       bio TEXT NOT NULL,
+      profile_photo_url TEXT NULL,
       hobbies TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
       prompt_one TEXT NULL,
       prompt_two TEXT NULL,
@@ -199,6 +200,7 @@ export async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_gender TEXT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS likes TEXT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS dislikes TEXT NULL;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS hobbies TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
     ALTER TABLE users ADD COLUMN IF NOT EXISTS prompt_one TEXT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS prompt_two TEXT NULL;

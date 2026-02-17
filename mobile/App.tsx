@@ -169,8 +169,8 @@ export default function App() {
             </View>
             {!locked && user ? (
               <Pressable style={styles.profileBtn} onPress={() => setProfileOpen(true)}>
-                {user.photos?.[0] ? (
-                  <Image source={{ uri: user.photos[0] }} style={styles.profileBtnImage} resizeMode="cover" />
+                {user.profilePhotoUrl ? (
+                  <Image source={{ uri: user.profilePhotoUrl }} style={styles.profileBtnImage} resizeMode="cover" />
                 ) : (
                   <Text style={styles.profileBtnText}>
                     {(user.firstName?.slice(0, 1) || "U").toUpperCase()}
@@ -276,6 +276,7 @@ export default function App() {
               <ScrollView contentContainerStyle={styles.scrollWrap}>
                 <ProfileScreen
                   userId={activeUserId}
+                  onProfileUpdated={setUser}
                   onSignOut={() => {
                     setProfileOpen(false);
                     void signOut();

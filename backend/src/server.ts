@@ -300,6 +300,7 @@ app.post("/users/:userId/profile", async (req, res) => {
     likes: z.string().min(1).max(280).optional(),
     dislikes: z.string().min(1).max(280).optional(),
     bio: z.string().min(1).max(500).optional(),
+    profilePhotoUrl: z.string().url().optional(),
     photos: z.array(z.string().url()).max(9).optional(),
     hobbies: z.array(z.string().min(1).max(40)).max(12).optional(),
     promptOne: z.string().min(1).max(280).optional(),

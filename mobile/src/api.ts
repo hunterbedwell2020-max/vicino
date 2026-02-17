@@ -56,6 +56,7 @@ export interface ApiUser {
   likes?: string | null;
   dislikes?: string | null;
   bio: string;
+  profilePhotoUrl?: string | null;
   verified: boolean;
   photos: string[];
   hobbies?: string[];
@@ -255,6 +256,7 @@ export function postUserProfile(
     likes?: string;
     dislikes?: string;
     bio?: string;
+    profilePhotoUrl?: string;
     photos?: string[];
     hobbies?: string[];
     promptOne?: string;

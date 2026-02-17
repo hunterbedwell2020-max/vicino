@@ -81,8 +81,11 @@ function toMatchPreview(
   return {
     id: apiMatch.id,
     name: otherUser?.firstName ?? "Match",
-    avatarUrl:
-      otherUser && Array.isArray(otherUser.photos) && otherUser.photos.length > 0 ? String(otherUser.photos[0]) : null,
+    avatarUrl: otherUser?.profilePhotoUrl
+      ? String(otherUser.profilePhotoUrl)
+      : otherUser && Array.isArray(otherUser.photos) && otherUser.photos.length > 0
+        ? String(otherUser.photos[0])
+        : null,
     messagesUsedByMe: Number(apiMatch.messagesByUser?.[currentUserId] ?? 0),
     messagesUsedByThem: Number(apiMatch.messagesByUser?.[otherId] ?? 0),
     meetDecisionByMe: (apiMatch.meetDecisionByUser?.[currentUserId] as MeetDecision | undefined) ?? null,
@@ -249,7 +252,10 @@ export function useVicinoState(currentUserId: string | null) {
             {
               id: `m_${current.id}`,
               name: current.name,
-              avatarUrl: current.photos[0] ?? null,
+              avatarUrl:
+                usersById[current.id]?.profilePhotoUrl ??
+                current.photos[0] ??
+                null,
               messagesUsedByMe: 0,
               messagesUsedByThem: 0,
               meetDecisionByMe: null,

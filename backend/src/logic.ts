@@ -59,6 +59,7 @@ function mapUser(row: Record<string, unknown>) {
     likes: row.likes ? String(row.likes) : null,
     dislikes: row.dislikes ? String(row.dislikes) : null,
     bio: String(row.bio ?? ""),
+    profilePhotoUrl: row.profile_photo_url ? String(row.profile_photo_url) : null,
     verified: Boolean(row.verified),
     photos: Array.isArray(row.photos) ? row.photos : [],
     hobbies: Array.isArray(row.hobbies) ? row.hobbies : [],
@@ -82,7 +83,7 @@ async function getUser(userId: string) {
 
 async function getUserAny(userId: string) {
   const { rows } = await pool.query(
-    `SELECT id, first_name, last_name, username, password_hash, is_admin, email, phone, age, gender, preferred_gender, likes, dislikes, bio, verified, photos,
+    `SELECT id, first_name, last_name, username, password_hash, is_admin, email, phone, age, gender, preferred_gender, likes, dislikes, bio, profile_photo_url, verified, photos,
             hobbies, prompt_one, prompt_two, prompt_three,
             latitude, longitude, max_distance_miles,
             verification_status, verification_submitted_at,
@@ -156,7 +157,7 @@ function isPublicPlaceId(placeId: string) {
 export async function listUsers() {
   const { rows } = await pool.query(
     `SELECT id, first_name, last_name, username, is_admin, email, phone, age, gender,
-            preferred_gender, likes, dislikes, bio, verified, photos,
+            preferred_gender, likes, dislikes, bio, profile_photo_url, verified, photos,
             hobbies, prompt_one, prompt_two, prompt_three,
             latitude, longitude, max_distance_miles
      FROM users
@@ -214,7 +215,7 @@ export async function loginAuthUser(username: string, password: string) {
   const normalized = username.trim().toLowerCase();
   const { rows } = await pool.query(
     `SELECT id, first_name, last_name, username, password_hash, is_admin, email, phone, age, gender, preferred_gender, likes, dislikes,
-            bio, verified, photos, hobbies, prompt_one, prompt_two, prompt_three, max_distance_miles
+            bio, profile_photo_url, verified, photos, hobbies, prompt_one, prompt_two, prompt_three, max_distance_miles
      FROM users
      WHERE username = $1`,
     [normalized]
@@ -241,7 +242,7 @@ export async function loginAuthUser(username: string, password: string) {
 export async function getAuthSession(token: string) {
   const { rows } = await pool.query(
     `SELECT u.id, u.first_name, u.last_name, u.username, u.is_admin, u.email, u.phone, u.age, u.gender, u.preferred_gender, u.likes, u.dislikes,
-            u.bio, u.verified, u.photos, u.hobbies, u.prompt_one, u.prompt_two, u.prompt_three, u.max_distance_miles,
+            u.bio, u.profile_photo_url, u.verified, u.photos, u.hobbies, u.prompt_one, u.prompt_two, u.prompt_three, u.max_distance_miles,
             u.verification_status, u.verification_submitted_at, u.verification_reviewed_at, u.verification_reviewer_note
      FROM auth_sessions s
      JOIN users u ON u.id = s.user_id
@@ -290,6 +291,7 @@ export async function updateUserProfile(
     likes?: string;
     dislikes?: string;
     bio?: string;
+    profilePhotoUrl?: string;
     photos?: string[];
     hobbies?: string[];
     promptOne?: string;
@@ -311,6 +313,7 @@ export async function updateUserProfile(
   const likes = updates.likes?.trim() || null;
   const dislikes = updates.dislikes?.trim() || null;
   const bio = updates.bio?.trim() || null;
+  const profilePhotoUrl = updates.profilePhotoUrl?.trim() || null;
   const photos = updates.photos ?? null;
   const hobbies = updates.hobbies ?? null;
   const promptOne = updates.promptOne?.trim() || null;
@@ -328,11 +331,12 @@ export async function updateUserProfile(
          likes = COALESCE($8, likes),
          dislikes = COALESCE($9, dislikes),
          bio = COALESCE($10, bio),
-         photos = COALESCE($11::jsonb, photos),
-         hobbies = COALESCE($12::text[], hobbies),
-         prompt_one = COALESCE($13, prompt_one),
-         prompt_two = COALESCE($14, prompt_two),
-         prompt_three = COALESCE($15, prompt_three)
+         profile_photo_url = COALESCE($11, profile_photo_url),
+         photos = COALESCE($12::jsonb, photos),
+         hobbies = COALESCE($13::text[], hobbies),
+         prompt_one = COALESCE($14, prompt_one),
+         prompt_two = COALESCE($15, prompt_two),
+         prompt_three = COALESCE($16, prompt_three)
      WHERE id = $1
      RETURNING id,
                first_name AS "firstName",
@@ -344,6 +348,7 @@ export async function updateUserProfile(
                likes,
                dislikes,
                bio,
+               profile_photo_url AS "profilePhotoUrl",
                verified,
                photos,
                hobbies,
@@ -362,6 +367,7 @@ export async function updateUserProfile(
       likes,
       dislikes,
       bio,
+      profilePhotoUrl,
       photos ? JSON.stringify(photos) : null,
       hobbies,
       promptOne,

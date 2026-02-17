@@ -37,9 +37,18 @@ const normalizeGender = (value: string | null | undefined): GenderOption => {
   return (GENDER_OPTIONS as readonly string[]).includes(next) ? (next as GenderOption) : "other";
 };
 
-export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut?: () => void }) {
+export function ProfileScreen({
+  userId,
+  onSignOut,
+  onProfileUpdated
+}: {
+  userId: string;
+  onSignOut?: () => void;
+  onProfileUpdated?: (user: ApiUser) => void;
+}) {
   const [user, setUser] = useState<ApiUser | null>(null);
   const [firstName, setFirstName] = useState("");
+  const [profilePhoto, setProfilePhoto] = useState("");
   const [gender, setGender] = useState<GenderOption>("other");
   const [preferredGender, setPreferredGender] = useState<GenderOption>("other");
   const [photos, setPhotos] = useState<string[]>(Array.from({ length: PHOTO_SLOTS }, () => ""));
@@ -75,6 +84,7 @@ export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut
 
       if (me) {
         setFirstName(me.firstName ?? "");
+        setProfilePhoto(me.profilePhotoUrl ?? "");
         setGender(normalizeGender(me.gender));
         setPreferredGender(normalizeGender(me.preferredGender));
         setPhotos(Array.from({ length: PHOTO_SLOTS }, (_, idx) => me.photos[idx] ?? ""));
@@ -105,6 +115,22 @@ export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut
     try {
       const normalizedPhotos = photos.map((p) => p.trim()).filter((p) => p.length > 0);
       const finalPhotos: string[] = [];
+      let finalProfilePhoto = profilePhoto.trim();
+      if (finalProfilePhoto) {
+        if (!(finalProfilePhoto.startsWith("http://") || finalProfilePhoto.startsWith("https://"))) {
+          const profilePayload = pendingPhotoPayloads[finalProfilePhoto];
+          if (profilePayload?.base64) {
+            const uploadedProfile = await uploadImageBase64(
+              profilePayload.base64,
+              profilePayload.mimeType,
+              `profile_avatar_${userId}`
+            );
+            finalProfilePhoto = uploadedProfile.url;
+          } else {
+            finalProfilePhoto = "";
+          }
+        }
+      }
       for (const photo of normalizedPhotos) {
         if (photo.startsWith("http://") || photo.startsWith("https://")) {
           finalPhotos.push(photo);
@@ -119,7 +145,7 @@ export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut
       }
       const normalizedHobbies = Array.from(
         new Set(selectedHobbies.map((h) => h.trim()).filter((h) => h.length > 0))
-      ).slice(0, 20);
+      ).slice(0, 12);
 
       const promptOnePacked = `${promptOneQuestion}|||${promptOne.trim()}`;
       const promptTwoPacked = `${promptTwoQuestion}|||${promptTwo.trim()}`;
@@ -130,6 +156,7 @@ export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut
         gender,
         preferredGender,
         bio: bio.trim() || undefined,
+        profilePhotoUrl: finalProfilePhoto || undefined,
         photos: finalPhotos.length > 0 ? finalPhotos : undefined,
         hobbies: normalizedHobbies.length > 0 ? normalizedHobbies : undefined,
         promptOne: promptOne.trim() ? promptOnePacked : undefined,
@@ -138,6 +165,8 @@ export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut
       });
       await postDistancePreference(userId, radiusMiles);
       setUser(updatedUser);
+      onProfileUpdated?.(updatedUser);
+      setProfilePhoto(updatedUser.profilePhotoUrl ?? "");
       setPhotos(Array.from({ length: PHOTO_SLOTS }, (_, idx) => updatedUser.photos[idx] ?? ""));
       setPendingPhotoPayloads({});
       setStatusText("Profile and settings saved.");
@@ -149,6 +178,7 @@ export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut
   const profileCompleteness = useMemo(() => {
     const fields = [
       firstName.trim().length > 0,
+      profilePhoto.trim().length > 0,
       photos.filter((p) => p.trim().length > 0).length > 0,
       bio.trim().length > 0,
       selectedHobbies.length > 0,
@@ -159,7 +189,7 @@ export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut
 
     const filled = fields.filter(Boolean).length;
     return Math.round((filled / fields.length) * 100);
-  }, [firstName, photos, bio, selectedHobbies.length, promptOne, promptTwo, promptThree]);
+  }, [firstName, profilePhoto, photos, bio, selectedHobbies.length, promptOne, promptTwo, promptThree]);
 
   const toggleHobby = (value: string) => {
     setSelectedHobbies((prev) =>
@@ -278,6 +308,36 @@ export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut
     }
   };
 
+  const addProfilePhotoFrom = async (source: "camera" | "library") => {
+    setError(null);
+    const permission =
+      source === "camera"
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setError(source === "camera" ? "Camera permission is required." : "Photo library permission is required.");
+      return;
+    }
+    const result =
+      source === "camera"
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: "images", quality: 0.8, base64: true })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: "images", quality: 0.8, base64: true });
+    if (result.canceled) {
+      return;
+    }
+    const asset = result.assets[0];
+    const uri = asset?.uri ?? "";
+    const base64 = asset?.base64 ?? "";
+    if (!uri || !base64) {
+      return;
+    }
+    setProfilePhoto(uri);
+    setPendingPhotoPayloads((prev) => ({
+      ...prev,
+      [uri]: { base64, mimeType: asset?.mimeType ?? "image/jpeg" }
+    }));
+  };
+
   return (
     <ScrollView contentContainerStyle={styles.wrap}>
       <View style={styles.card}>
@@ -326,6 +386,31 @@ export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut
               <Text style={[styles.choiceText, preferredGender === value && styles.choiceTextActive]}>{value}</Text>
             </Pressable>
           ))}
+        </View>
+
+        <Text style={styles.sectionTitle}>Profile Photo</Text>
+        <Text style={styles.helper}>Used for your top-right avatar and message chats.</Text>
+        <View style={styles.profilePhotoWrap}>
+          {profilePhoto ? (
+            <Image source={{ uri: profilePhoto }} style={styles.profilePhotoPreview} resizeMode="cover" />
+          ) : (
+            <View style={styles.profilePhotoFallback}>
+              <Text style={styles.profilePhotoFallbackText}>{(firstName.slice(0, 1) || "U").toUpperCase()}</Text>
+            </View>
+          )}
+          <View style={styles.profilePhotoActions}>
+            <Pressable style={styles.photoBtn} onPress={() => void addProfilePhotoFrom("camera")}>
+              <Text style={styles.photoBtnText}>Take</Text>
+            </Pressable>
+            <Pressable style={styles.photoBtn} onPress={() => void addProfilePhotoFrom("library")}>
+              <Text style={styles.photoBtnText}>Choose</Text>
+            </Pressable>
+            {profilePhoto ? (
+              <Pressable style={styles.removeAvatarBtn} onPress={() => setProfilePhoto("")}>
+                <Text style={styles.removeAvatarBtnText}>Remove</Text>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
 
         <Text style={styles.sectionTitle}>Photos (up to 9)</Text>
@@ -669,6 +754,44 @@ const styles = StyleSheet.create({
   },
   choiceTextActive: {
     color: "#fff"
+  },
+  profilePhotoWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12
+  },
+  profilePhotoPreview: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: "#EEE"
+  },
+  profilePhotoFallback: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: "#EDE7F6",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  profilePhotoFallbackText: {
+    color: theme.colors.primary,
+    fontWeight: "800",
+    fontSize: 24
+  },
+  profilePhotoActions: {
+    flex: 1,
+    gap: 8
+  },
+  removeAvatarBtn: {
+    backgroundColor: "#FBEAEA",
+    borderRadius: theme.radius.sm,
+    alignItems: "center",
+    paddingVertical: 10
+  },
+  removeAvatarBtnText: {
+    color: "#B42318",
+    fontWeight: "700"
   },
   photoSlot: {
     borderRadius: theme.radius.sm,
