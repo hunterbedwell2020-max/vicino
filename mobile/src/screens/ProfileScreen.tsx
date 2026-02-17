@@ -206,6 +206,21 @@ export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut
     setPromptThree(three.answer);
   }, [user]);
 
+  const questionChoicesFor = (slot: 1 | 2 | 3) => {
+    const selectedByOtherSlots =
+      slot === 1
+        ? new Set([promptTwoQuestion, promptThreeQuestion])
+        : slot === 2
+          ? new Set([promptOneQuestion, promptThreeQuestion])
+          : new Set([promptOneQuestion, promptTwoQuestion]);
+
+    const selectedForSlot = slot === 1 ? promptOneQuestion : slot === 2 ? promptTwoQuestion : promptThreeQuestion;
+
+    return PROMPT_OPTIONS.filter(
+      (question) => question === selectedForSlot || !selectedByOtherSlots.has(question)
+    );
+  };
+
   const addPhotoFrom = async (source: "camera" | "library") => {
     setError(null);
     const permission =
@@ -393,12 +408,12 @@ export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Prompts</Text>
+        <Text style={styles.sectionTitle}>Q&A</Text>
         <Text style={styles.helper}>Choose 3 prompts and write your answers.</Text>
 
         <Text style={styles.promptLabel}>Prompt 1</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.promptScroll}>
-          {PROMPT_OPTIONS.map((option) => (
+          {questionChoicesFor(1).map((option) => (
             <Pressable
               key={`p1-${option}`}
               style={[styles.promptChoice, promptOneQuestion === option && styles.promptChoiceActive]}
@@ -422,7 +437,7 @@ export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut
 
         <Text style={styles.promptLabel}>Prompt 2</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.promptScroll}>
-          {PROMPT_OPTIONS.map((option) => (
+          {questionChoicesFor(2).map((option) => (
             <Pressable
               key={`p2-${option}`}
               style={[styles.promptChoice, promptTwoQuestion === option && styles.promptChoiceActive]}
@@ -446,7 +461,7 @@ export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut
 
         <Text style={styles.promptLabel}>Prompt 3</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.promptScroll}>
-          {PROMPT_OPTIONS.map((option) => (
+          {questionChoicesFor(3).map((option) => (
             <Pressable
               key={`p3-${option}`}
               style={[styles.promptChoice, promptThreeQuestion === option && styles.promptChoiceActive]}
