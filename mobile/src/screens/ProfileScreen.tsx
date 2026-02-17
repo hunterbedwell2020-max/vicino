@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { getUsers, postDistancePreference, postUserProfile, uploadImageBase64, type ApiUser } from "../api";
 import { theme } from "../theme";
@@ -62,6 +62,8 @@ export function ProfileScreen({
   const [promptTwo, setPromptTwo] = useState("");
   const [promptThree, setPromptThree] = useState("");
   const [radiusMiles, setRadiusMiles] = useState(25);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewPhotoIndex, setPreviewPhotoIndex] = useState(0);
   const [statusText, setStatusText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingPhotoPayloads, setPendingPhotoPayloads] = useState<
@@ -307,6 +309,9 @@ export function ProfileScreen({
       });
     }
   };
+
+  const previewPhotos = photos.map((p) => p.trim()).filter((p) => p.length > 0);
+  const currentPreviewPhoto = previewPhotos[previewPhotoIndex] ?? null;
 
   const addProfilePhotoFrom = async (source: "camera" | "library") => {
     setError(null);
@@ -581,6 +586,16 @@ export function ProfileScreen({
           </Pressable>
         </View>
 
+        <Pressable
+          style={styles.previewBtn}
+          onPress={() => {
+            setPreviewPhotoIndex(0);
+            setPreviewOpen(true);
+          }}
+        >
+          <Text style={styles.previewBtnText}>Profile Preview</Text>
+        </Pressable>
+
         <Pressable style={styles.saveBtn} onPress={saveSettings}>
           <Text style={styles.saveText}>Save Profile</Text>
         </Pressable>
@@ -588,6 +603,72 @@ export function ProfileScreen({
 
       {statusText ? <Text style={styles.success}>{statusText}</Text> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      <Modal visible={previewOpen} animationType="slide">
+        <View style={styles.previewWrap}>
+          <View style={styles.previewHeader}>
+            <Text style={styles.previewTitle}>Your Profile Preview</Text>
+            <Pressable onPress={() => setPreviewOpen(false)}>
+              <Text style={styles.previewClose}>Close</Text>
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={styles.previewContent}>
+            {currentPreviewPhoto ? (
+              <Image source={{ uri: currentPreviewPhoto }} style={styles.previewHero} resizeMode="cover" />
+            ) : (
+              <View style={styles.previewHeroFallback}>
+                <Text style={styles.previewHeroFallbackText}>Add photos to see profile preview</Text>
+              </View>
+            )}
+            {previewPhotos.length > 1 ? (
+              <View style={styles.row}>
+                <Pressable
+                  style={styles.radiusBtn}
+                  onPress={() => setPreviewPhotoIndex((prev) => Math.max(prev - 1, 0))}
+                  disabled={previewPhotoIndex === 0}
+                >
+                  <Text style={styles.radiusBtnText}>Prev Photo</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.radiusBtn}
+                  onPress={() =>
+                    setPreviewPhotoIndex((prev) => Math.min(prev + 1, previewPhotos.length - 1))
+                  }
+                  disabled={previewPhotoIndex >= previewPhotos.length - 1}
+                >
+                  <Text style={styles.radiusBtnText}>Next Photo</Text>
+                </Pressable>
+              </View>
+            ) : null}
+
+            <View style={styles.previewCard}>
+              <Text style={styles.previewName}>{firstName || "Your Name"}, {user?.age ?? 18}</Text>
+              <Text style={styles.previewBio}>{bio || "Your bio will appear here."}</Text>
+            </View>
+
+            <View style={styles.previewCard}>
+              <Text style={styles.sectionTitle}>Hobbies</Text>
+              <View style={styles.selectedWrap}>
+                {(selectedHobbies.length > 0 ? selectedHobbies : ["Add hobbies"]).map((hobby) => (
+                  <View key={`preview-${hobby}`} style={styles.selectedChip}>
+                    <Text style={styles.selectedChipText}>{hobby}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            <View style={styles.previewCard}>
+              <Text style={styles.sectionTitle}>Q&A</Text>
+              <Text style={styles.previewQuestion}>{promptOneQuestion}</Text>
+              <Text style={styles.previewAnswer}>{promptOne || "Your answer..."}</Text>
+              <Text style={styles.previewQuestion}>{promptTwoQuestion}</Text>
+              <Text style={styles.previewAnswer}>{promptTwo || "Your answer..."}</Text>
+              <Text style={styles.previewQuestion}>{promptThreeQuestion}</Text>
+              <Text style={styles.previewAnswer}>{promptThree || "Your answer..."}</Text>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -834,6 +915,17 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "700"
   },
+  previewBtn: {
+    marginTop: 4,
+    backgroundColor: "#EDE7F6",
+    borderRadius: theme.radius.sm,
+    alignItems: "center",
+    paddingVertical: 10
+  },
+  previewBtnText: {
+    color: theme.colors.primary,
+    fontWeight: "700"
+  },
   signOutBtn: {
     marginTop: 6,
     backgroundColor: "#EDE7F6",
@@ -852,5 +944,69 @@ const styles = StyleSheet.create({
   error: {
     color: theme.colors.danger,
     fontWeight: "700"
+  },
+  previewWrap: {
+    flex: 1,
+    backgroundColor: theme.colors.background
+  },
+  previewHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 56,
+    paddingBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between"
+  },
+  previewTitle: {
+    color: theme.colors.text,
+    fontSize: 20,
+    fontWeight: "800"
+  },
+  previewClose: {
+    color: theme.colors.primary,
+    fontWeight: "700"
+  },
+  previewContent: {
+    gap: 10,
+    padding: 14,
+    paddingBottom: 24
+  },
+  previewHero: {
+    width: "100%",
+    height: 330,
+    borderRadius: theme.radius.md,
+    backgroundColor: "#EEE"
+  },
+  previewHeroFallback: {
+    width: "100%",
+    height: 200,
+    borderRadius: theme.radius.md,
+    backgroundColor: "#F6F1FB",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  previewHeroFallbackText: {
+    color: theme.colors.muted
+  },
+  previewCard: {
+    backgroundColor: theme.colors.card,
+    borderRadius: theme.radius.md,
+    padding: 12,
+    gap: 8
+  },
+  previewName: {
+    color: theme.colors.text,
+    fontSize: 22,
+    fontWeight: "800"
+  },
+  previewBio: {
+    color: theme.colors.muted
+  },
+  previewQuestion: {
+    color: theme.colors.text,
+    fontWeight: "700"
+  },
+  previewAnswer: {
+    color: theme.colors.muted
   }
 });

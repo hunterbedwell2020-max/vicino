@@ -72,17 +72,19 @@ export function ActiveMatchesScreen({
         </Text>
         <View style={styles.sessionActions}>
           {!outTonight.enabled ? (
-            <Pressable
-              style={[
-                styles.actionBtn,
-                styles.openBtn,
-                eligibleOutCount === 0 && styles.actionBtnDisabled
-              ]}
-              disabled={eligibleOutCount === 0}
-              onPress={startOutTonight}
-            >
-              <Text style={styles.actionBtnText}>Go Open Tonight</Text>
-            </Pressable>
+            <View style={styles.logoActionWrap}>
+              <Pressable
+                style={[
+                  styles.logoBtn,
+                  eligibleOutCount === 0 && styles.actionBtnDisabled
+                ]}
+                disabled={eligibleOutCount === 0}
+                onPress={startOutTonight}
+              >
+                <Text style={styles.logoMark}>🤝</Text>
+                <Text style={styles.logoBtnText}>Go Open Tonight</Text>
+              </Pressable>
+            </View>
           ) : (
             <Pressable style={[styles.actionBtn, styles.closeBtn]} onPress={stopOutTonight}>
               <Text style={styles.actionBtnText}>Close Session</Text>
@@ -91,7 +93,7 @@ export function ActiveMatchesScreen({
         </View>
         {eligibleOutCount === 0 ? (
           <Text style={styles.flowHint}>
-            Requires at least one match where both people selected YES after messages are capped.
+            Requires at least one match where both people selected YES in Messages.
           </Text>
         ) : null}
         {outTonight.error ? <Text style={styles.errorText}>{outTonight.error}</Text> : null}
@@ -216,6 +218,33 @@ const styles = StyleSheet.create({
   sessionTitle: { fontSize: 20, fontWeight: "800", color: theme.colors.primary },
   sessionSub: { color: theme.colors.muted },
   sessionActions: { marginTop: 2 },
+  logoActionWrap: {
+    alignItems: "center",
+    marginTop: 4
+  },
+  logoBtn: {
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    backgroundColor: theme.colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    shadowColor: "#000",
+    shadowOpacity: 0.16,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3
+  },
+  logoMark: {
+    fontSize: 42,
+    marginBottom: 8
+  },
+  logoBtnText: {
+    color: "#fff",
+    fontWeight: "800",
+    textAlign: "center"
+  },
   actionBtn: {
     borderRadius: theme.radius.sm,
     paddingVertical: 10,
