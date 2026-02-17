@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { theme } from "../theme";
 import type { TabKey } from "../types";
 
@@ -33,7 +33,7 @@ export function TabBar({
         >
           {tab.key === "matches" ? (
             <View style={[styles.logoCircle, active === tab.key && styles.logoCircleActive]}>
-              <Text style={styles.logoMark}>🤝</Text>
+              <Image source={require("../../assets/vicino-logo.png")} style={styles.logoImage} resizeMode="cover" />
               {activeMatchesBadgeCount > 0 ? (
                 <View style={styles.badge}>
                   <Text style={styles.badgeText}>
@@ -86,17 +86,19 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: theme.colors.primary,
+    backgroundColor: "#fff",
     borderWidth: 3,
     borderColor: "#EADCF8",
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    overflow: "hidden"
   },
   logoCircleActive: {
     borderColor: "#ffffff"
   },
-  logoMark: {
-    fontSize: 26
+  logoImage: {
+    width: "100%",
+    height: "100%"
   },
   centerLabel: {
     color: theme.colors.primary,
