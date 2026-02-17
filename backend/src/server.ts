@@ -216,8 +216,10 @@ app.get("/admin/verifications", requireAdminAccess, async (req, res) => {
   const validStatus = ["pending", "approved", "rejected", "all"].includes(status)
     ? (status as "pending" | "approved" | "rejected" | "all")
     : "pending";
+  const limit = Math.max(1, Math.min(Number(req.query.limit ?? 50), 200));
+  const offset = Math.max(0, Number(req.query.offset ?? 0));
   try {
-    const rows = await listVerificationQueue(validStatus);
+    const rows = await listVerificationQueue(validStatus, { limit, offset });
     return res.json(rows);
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
@@ -325,9 +327,12 @@ app.post("/users/:userId/profile", async (req, res) => {
   }
 });
 
-app.get("/matches", async (_req, res) => {
+app.get("/matches", async (req, res) => {
+  const userId = req.query.userId ? String(req.query.userId) : undefined;
+  const limit = Math.max(1, Math.min(Number(req.query.limit ?? 50), 200));
+  const offset = Math.max(0, Number(req.query.offset ?? 0));
   try {
-    res.json(await listMatches());
+    res.json(await listMatches(userId, { limit, offset }));
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
@@ -383,8 +388,10 @@ app.post("/messages", async (req, res) => {
 });
 
 app.get("/messages/:matchId", async (req, res) => {
+  const limit = Math.max(1, Math.min(Number(req.query.limit ?? 100), 300));
+  const before = req.query.before ? String(req.query.before) : null;
   try {
-    const rows = await listMessages(req.params.matchId);
+    const rows = await listMessages(req.params.matchId, { limit, before });
     return res.json(rows);
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });

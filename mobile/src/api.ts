@@ -278,12 +278,23 @@ export function getDiscovery(userId: string) {
   return request<ApiUser[]>(`/discovery/${userId}`);
 }
 
-export function getMatches() {
-  return request<ApiMatch[]>("/matches");
+export function getMatches(userId?: string, limit = 50, offset = 0) {
+  const params = new URLSearchParams();
+  if (userId) {
+    params.set("userId", userId);
+  }
+  params.set("limit", String(limit));
+  params.set("offset", String(offset));
+  return request<ApiMatch[]>(`/matches?${params.toString()}`);
 }
 
-export function getMessages(matchId: string) {
-  return request<ApiMessage[]>(`/messages/${matchId}`);
+export function getMessages(matchId: string, limit = 100, before?: string | null) {
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  if (before) {
+    params.set("before", before);
+  }
+  return request<ApiMessage[]>(`/messages/${matchId}?${params.toString()}`);
 }
 
 export function postSwipe(fromUserId: string, toUserId: string, decision: "left" | "right") {
@@ -381,14 +392,19 @@ export function postVerificationSubmit(
 export function getVerificationQueue(
   status: "pending" | "approved" | "rejected" | "all" = "pending",
   authToken?: string,
-  adminKey?: string
+  adminKey?: string,
+  limit = 50,
+  offset = 0
 ) {
-  return request<VerificationSubmission[]>(`/admin/verifications?status=${status}`, {
+  return request<VerificationSubmission[]>(
+    `/admin/verifications?status=${status}&limit=${limit}&offset=${offset}`,
+    {
     headers: {
       ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       ...(adminKey ? { "x-admin-key": adminKey } : {})
     }
-  });
+    }
+  );
 }
 
 export function postReviewVerification(

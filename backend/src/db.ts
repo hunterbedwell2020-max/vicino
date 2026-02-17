@@ -309,9 +309,15 @@ export async function initDb() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_matches_pair ON matches (user_a_id, user_b_id);
+    CREATE INDEX IF NOT EXISTS idx_matches_user_a_created ON matches (user_a_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_matches_user_b_created ON matches (user_b_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_messages_match ON messages (match_id);
+    CREATE INDEX IF NOT EXISTS idx_messages_match_created ON messages (match_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_meet_decisions_match ON meet_decisions (match_id);
     CREATE INDEX IF NOT EXISTS idx_session_candidates_session ON session_candidates (session_id);
+    CREATE INDEX IF NOT EXISTS idx_swipes_from_created ON swipes (from_user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_swipes_to_decision ON swipes (to_user_id, decision);
+    CREATE INDEX IF NOT EXISTS idx_users_discovery_filter ON users (verified, gender, preferred_gender);
     CREATE INDEX IF NOT EXISTS idx_users_geo ON users (latitude, longitude);
     CREATE INDEX IF NOT EXISTS idx_verification_submissions_status ON verification_submissions (status, submitted_at DESC);
     CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions (user_id);

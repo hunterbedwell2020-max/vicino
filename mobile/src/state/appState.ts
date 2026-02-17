@@ -160,7 +160,7 @@ export function useVicinoState(currentUserId: string | null) {
     const byId = Object.fromEntries(users.map((user) => [user.id, user])) as Record<string, ApiUser>;
     setUsersById(byId);
 
-    const apiMatches = await getMatches();
+    const apiMatches = await getMatches(currentUserId, 50, 0);
     setMatches((prev) => {
       const prevById = Object.fromEntries(prev.map((match) => [match.id, match])) as Record<string, MatchPreview>;
       return apiMatches.map((apiMatch) =>

@@ -548,13 +548,21 @@ export async function submitVerification(
   };
 }
 
-export async function listVerificationQueue(status: "pending" | "approved" | "rejected" | "all" = "pending") {
+export async function listVerificationQueue(
+  status: "pending" | "approved" | "rejected" | "all" = "pending",
+  options?: { limit?: number; offset?: number }
+) {
+  const limit = Math.max(1, Math.min(Number(options?.limit ?? 50), 200));
+  const offset = Math.max(0, Number(options?.offset ?? 0));
   const params: unknown[] = [];
   let whereClause = "";
   if (status !== "all") {
     params.push(status);
     whereClause = `WHERE vs.status = $1`;
   }
+  params.push(limit, offset);
+  const limitParam = `$${params.length - 1}`;
+  const offsetParam = `$${params.length}`;
 
   const { rows } = await pool.query(
     `SELECT
@@ -575,7 +583,9 @@ export async function listVerificationQueue(status: "pending" | "approved" | "re
      FROM verification_submissions vs
      JOIN users u ON u.id = vs.user_id
      ${whereClause}
-     ORDER BY vs.submitted_at DESC`,
+     ORDER BY vs.submitted_at DESC
+     LIMIT ${limitParam}
+     OFFSET ${offsetParam}`,
     params
   );
 
@@ -627,11 +637,26 @@ export async function reviewVerificationSubmission(
   };
 }
 
-export async function listMatches() {
+export async function listMatches(userId?: string, options?: { limit?: number; offset?: number }) {
+  const limit = Math.max(1, Math.min(Number(options?.limit ?? 50), 200));
+  const offset = Math.max(0, Number(options?.offset ?? 0));
+  const params: unknown[] = [];
+  let whereClause = "";
+  if (userId) {
+    params.push(userId);
+    whereClause = `WHERE user_a_id = $1 OR user_b_id = $1`;
+  }
+  params.push(limit, offset);
+  const limitParam = `$${params.length - 1}`;
+  const offsetParam = `$${params.length}`;
   const { rows } = await pool.query(
     `SELECT id, user_a_id, user_b_id, created_at, coordination_ends_at
      FROM matches
-     ORDER BY created_at DESC`
+     ${whereClause}
+     ORDER BY created_at DESC
+     LIMIT ${limitParam}
+     OFFSET ${offsetParam}`,
+    params
   );
 
   const out = [] as Array<Record<string, unknown>>;
@@ -676,17 +701,23 @@ export async function listOffers() {
   return rows;
 }
 
-export async function listMessages(matchId: string) {
+export async function listMessages(matchId: string, options?: { limit?: number; before?: string | null }) {
   await getMatchById(matchId);
+  const limit = Math.max(1, Math.min(Number(options?.limit ?? 100), 300));
+  const before = options?.before ? new Date(options.before) : null;
+  const beforeIso =
+    before && !Number.isNaN(before.getTime()) ? before.toISOString() : null;
 
   const { rows } = await pool.query(
     `SELECT id, match_id AS "matchId", sender_user_id AS "senderUserId", body, created_at AS "createdAt"
      FROM messages
      WHERE match_id = $1
-     ORDER BY created_at ASC`,
-    [matchId]
+       AND ($2::timestamptz IS NULL OR created_at < $2::timestamptz)
+     ORDER BY created_at DESC
+     LIMIT $3`,
+    [matchId, beforeIso, limit]
   );
-  return rows;
+  return [...rows].reverse();
 }
 
 export async function swipe(fromUserId: string, toUserId: string, decision: SwipeDecision) {
@@ -697,40 +728,71 @@ export async function swipe(fromUserId: string, toUserId: string, decision: Swip
     throw new Error("Cannot swipe on self");
   }
 
-  await pool.query(
-    `INSERT INTO swipes (from_user_id, to_user_id, decision, created_at)
-     VALUES ($1, $2, $3, NOW())
-     ON CONFLICT (from_user_id, to_user_id)
-     DO UPDATE SET decision = EXCLUDED.decision, created_at = NOW()`,
-    [fromUserId, toUserId, decision]
-  );
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const pairKey = [fromUserId, toUserId].sort().join(":");
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [pairKey]);
 
-  if (decision === "left") {
-    return { matched: false };
-  }
+    await client.query(
+      `INSERT INTO swipes (from_user_id, to_user_id, decision, created_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (from_user_id, to_user_id)
+       DO UPDATE SET decision = EXCLUDED.decision, created_at = NOW()`,
+      [fromUserId, toUserId, decision]
+    );
 
-  const reciprocal = await pool.query(
-    `SELECT 1
-     FROM swipes
-     WHERE from_user_id = $1 AND to_user_id = $2 AND decision = 'right'`,
-    [toUserId, fromUserId]
-  );
+    if (decision === "left") {
+      await client.query("COMMIT");
+      return { matched: false };
+    }
 
-  if (reciprocal.rowCount === 0) {
-    return { matched: false };
-  }
+    const reciprocal = await client.query(
+      `SELECT 1
+       FROM swipes
+       WHERE from_user_id = $1 AND to_user_id = $2 AND decision = 'right'`,
+      [toUserId, fromUserId]
+    );
 
-  const existing = await pool.query(
-    `SELECT id, user_a_id, user_b_id, created_at, coordination_ends_at
-     FROM matches
-     WHERE (user_a_id = $1 AND user_b_id = $2)
-        OR (user_a_id = $2 AND user_b_id = $1)
-     LIMIT 1`,
-    [fromUserId, toUserId]
-  );
+    if (reciprocal.rowCount === 0) {
+      await client.query("COMMIT");
+      return { matched: false };
+    }
 
-  if (existing.rowCount && existing.rows[0]) {
-    const row = existing.rows[0];
+    const existing = await client.query(
+      `SELECT id, user_a_id, user_b_id, created_at, coordination_ends_at
+       FROM matches
+       WHERE (user_a_id = $1 AND user_b_id = $2)
+          OR (user_a_id = $2 AND user_b_id = $1)
+       LIMIT 1`,
+      [fromUserId, toUserId]
+    );
+
+    if (existing.rowCount && existing.rows[0]) {
+      await client.query("COMMIT");
+      const row = existing.rows[0];
+      return {
+        matched: true,
+        match: {
+          id: row.id,
+          userAId: row.user_a_id,
+          userBId: row.user_b_id,
+          createdAt: row.created_at,
+          coordinationEndsAt: row.coordination_ends_at
+        }
+      };
+    }
+
+    const matchId = id("match");
+    const inserted = await client.query(
+      `INSERT INTO matches (id, user_a_id, user_b_id, created_at)
+       VALUES ($1, $2, $3, NOW())
+       RETURNING id, user_a_id, user_b_id, created_at, coordination_ends_at`,
+      [matchId, fromUserId, toUserId]
+    );
+    await client.query("COMMIT");
+
+    const row = inserted.rows[0];
     return {
       matched: true,
       match: {
@@ -738,33 +800,18 @@ export async function swipe(fromUserId: string, toUserId: string, decision: Swip
         userAId: row.user_a_id,
         userBId: row.user_b_id,
         createdAt: row.created_at,
-        coordinationEndsAt: row.coordination_ends_at
+        coordinationEndsAt: row.coordination_ends_at,
+        messagesByUser: { [fromUserId]: 0, [toUserId]: 0 },
+        totalMessages: 0,
+        meetDecisionByUser: {}
       }
     };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
   }
-
-  const matchId = id("match");
-  const inserted = await pool.query(
-    `INSERT INTO matches (id, user_a_id, user_b_id, created_at)
-     VALUES ($1, $2, $3, NOW())
-     RETURNING id, user_a_id, user_b_id, created_at, coordination_ends_at`,
-    [matchId, fromUserId, toUserId]
-  );
-
-  const row = inserted.rows[0];
-  return {
-    matched: true,
-    match: {
-      id: row.id,
-      userAId: row.user_a_id,
-      userBId: row.user_b_id,
-      createdAt: row.created_at,
-      coordinationEndsAt: row.coordination_ends_at,
-      messagesByUser: { [fromUserId]: 0, [toUserId]: 0 },
-      totalMessages: 0,
-      meetDecisionByUser: {}
-    }
-  };
 }
 
 export async function sendMessage(matchId: string, senderUserId: string, body: string) {
