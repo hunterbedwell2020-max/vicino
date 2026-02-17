@@ -161,11 +161,13 @@ export default function App() {
       <SafeAreaView style={styles.topInset} />
       <SafeAreaView style={styles.safe}>
         <StatusBar barStyle="light-content" />
-        <View style={styles.header}>
+        <View style={[styles.header, state.tab === "swipe" && styles.headerCompact]}>
           <View style={styles.headerTopRow}>
             <View>
               <Text style={styles.brand}>Vicino</Text>
-              <Text style={styles.subtitle}>Near, intentional, and in-person.</Text>
+              <Text style={[styles.subtitle, state.tab === "swipe" && styles.subtitleCompact]}>
+                Where Better First Stories Meet
+              </Text>
             </View>
             {!locked && user ? (
               <Pressable style={styles.profileBtn} onPress={() => setProfileOpen(true)}>
@@ -312,6 +314,12 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20
   },
+  headerCompact: {
+    paddingTop: 8,
+    paddingBottom: 8,
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14
+  },
   headerTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -326,6 +334,10 @@ const styles = StyleSheet.create({
   subtitle: {
     marginTop: 2,
     color: "#EADCF8"
+  },
+  subtitleCompact: {
+    marginTop: 0,
+    fontSize: 12
   },
   profileBtn: {
     width: 40,
