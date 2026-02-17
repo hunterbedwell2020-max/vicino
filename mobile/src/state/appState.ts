@@ -61,6 +61,10 @@ const toDeckCard = (user: ApiUser): ProfileCard => ({
     {
       question: "Something I value in dating?",
       answer: user.promptTwo?.trim() || "Intentionality and clear communication."
+    },
+    {
+      question: "A green flag I look for?",
+      answer: user.promptThree?.trim() || "Consistency and kindness."
     }
   ]
 });

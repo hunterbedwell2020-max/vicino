@@ -6,6 +6,31 @@ import { theme } from "../theme";
 
 const PHOTO_SLOTS = 9;
 const GENDER_OPTIONS = ["male", "female", "other"] as const;
+const HOBBY_OPTIONS = [
+  "Coffee",
+  "Hiking",
+  "Live music",
+  "Travel",
+  "Cooking",
+  "Gym",
+  "Photography",
+  "Movies",
+  "Art",
+  "Running",
+  "Brunch",
+  "Reading"
+] as const;
+const PROMPT_OPTIONS = [
+  "A perfect first meetup looks like...",
+  "A green flag I always notice...",
+  "I am known for...",
+  "My ideal Sunday is...",
+  "I get excited about...",
+  "The best way to get to know me is...",
+  "A small thing that makes me happy...",
+  "My love language is..."
+] as const;
+const DEFAULT_PROMPTS = [PROMPT_OPTIONS[0], PROMPT_OPTIONS[1], PROMPT_OPTIONS[3]];
 type GenderOption = (typeof GENDER_OPTIONS)[number];
 const normalizeGender = (value: string | null | undefined): GenderOption => {
   const next = (value ?? "other").toLowerCase();
@@ -19,9 +44,14 @@ export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut
   const [preferredGender, setPreferredGender] = useState<GenderOption>("other");
   const [photos, setPhotos] = useState<string[]>(Array.from({ length: PHOTO_SLOTS }, () => ""));
   const [bio, setBio] = useState("");
-  const [hobbies, setHobbies] = useState("");
+  const [selectedHobbies, setSelectedHobbies] = useState<string[]>([]);
+  const [customHobby, setCustomHobby] = useState("");
+  const [promptOneQuestion, setPromptOneQuestion] = useState<string>(DEFAULT_PROMPTS[0]);
+  const [promptTwoQuestion, setPromptTwoQuestion] = useState<string>(DEFAULT_PROMPTS[1]);
+  const [promptThreeQuestion, setPromptThreeQuestion] = useState<string>(DEFAULT_PROMPTS[2]);
   const [promptOne, setPromptOne] = useState("");
   const [promptTwo, setPromptTwo] = useState("");
+  const [promptThree, setPromptThree] = useState("");
   const [radiusMiles, setRadiusMiles] = useState(25);
   const [statusText, setStatusText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -49,9 +79,10 @@ export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut
         setPreferredGender(normalizeGender(me.preferredGender));
         setPhotos(Array.from({ length: PHOTO_SLOTS }, (_, idx) => me.photos[idx] ?? ""));
         setBio(me.bio ?? "");
-        setHobbies(Array.isArray(me.hobbies) ? me.hobbies.join(", ") : "");
+        setSelectedHobbies(Array.isArray(me.hobbies) ? me.hobbies : []);
         setPromptOne(me.promptOne ?? "");
         setPromptTwo(me.promptTwo ?? "");
+        setPromptThree(me.promptThree ?? "");
         setRadiusMiles(Math.round(Number(me.maxDistanceMiles ?? 25)));
       }
     } catch (err) {
@@ -86,10 +117,13 @@ export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut
         const uploaded = await uploadImageBase64(payload.base64, payload.mimeType, `profile_${userId}`);
         finalPhotos.push(uploaded.url);
       }
-      const normalizedHobbies = hobbies
-        .split(",")
-        .map((h) => h.trim())
-        .filter((h) => h.length > 0);
+      const normalizedHobbies = Array.from(
+        new Set(selectedHobbies.map((h) => h.trim()).filter((h) => h.length > 0))
+      ).slice(0, 20);
+
+      const promptOnePacked = `${promptOneQuestion}|||${promptOne.trim()}`;
+      const promptTwoPacked = `${promptTwoQuestion}|||${promptTwo.trim()}`;
+      const promptThreePacked = `${promptThreeQuestion}|||${promptThree.trim()}`;
 
       const updatedUser = await postUserProfile(userId, {
         firstName: firstName.trim() || undefined,
@@ -98,8 +132,9 @@ export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut
         bio: bio.trim() || undefined,
         photos: finalPhotos.length > 0 ? finalPhotos : undefined,
         hobbies: normalizedHobbies.length > 0 ? normalizedHobbies : undefined,
-        promptOne: promptOne.trim() || undefined,
-        promptTwo: promptTwo.trim() || undefined
+        promptOne: promptOne.trim() ? promptOnePacked : undefined,
+        promptTwo: promptTwo.trim() ? promptTwoPacked : undefined,
+        promptThree: promptThree.trim() ? promptThreePacked : undefined
       });
       await postDistancePreference(userId, radiusMiles);
       setUser(updatedUser);
@@ -116,14 +151,60 @@ export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut
       firstName.trim().length > 0,
       photos.filter((p) => p.trim().length > 0).length > 0,
       bio.trim().length > 0,
-      hobbies.trim().length > 0,
+      selectedHobbies.length > 0,
       promptOne.trim().length > 0,
-      promptTwo.trim().length > 0
+      promptTwo.trim().length > 0,
+      promptThree.trim().length > 0
     ];
 
     const filled = fields.filter(Boolean).length;
     return Math.round((filled / fields.length) * 100);
-  }, [firstName, photos, bio, hobbies, promptOne, promptTwo]);
+  }, [firstName, photos, bio, selectedHobbies.length, promptOne, promptTwo, promptThree]);
+
+  const toggleHobby = (value: string) => {
+    setSelectedHobbies((prev) =>
+      prev.includes(value) ? prev.filter((h) => h !== value) : [...prev, value]
+    );
+  };
+
+  const addCustomHobby = () => {
+    const value = customHobby.trim();
+    if (!value) {
+      return;
+    }
+    setSelectedHobbies((prev) => (prev.includes(value) ? prev : [...prev, value]));
+    setCustomHobby("");
+  };
+
+  const unpackPrompt = (packed: string | null | undefined, fallbackQuestion: string) => {
+    const raw = (packed ?? "").trim();
+    if (!raw) {
+      return { question: fallbackQuestion, answer: "" };
+    }
+    const [question, ...rest] = raw.split("|||");
+    if (rest.length === 0) {
+      return { question: fallbackQuestion, answer: raw };
+    }
+    return {
+      question: question.trim() || fallbackQuestion,
+      answer: rest.join("|||").trim()
+    };
+  };
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+    const one = unpackPrompt(user.promptOne, DEFAULT_PROMPTS[0]);
+    const two = unpackPrompt(user.promptTwo, DEFAULT_PROMPTS[1]);
+    const three = unpackPrompt(user.promptThree, DEFAULT_PROMPTS[2]);
+    setPromptOneQuestion(one.question);
+    setPromptTwoQuestion(two.question);
+    setPromptThreeQuestion(three.question);
+    setPromptOne(one.answer);
+    setPromptTwo(two.answer);
+    setPromptThree(three.answer);
+  }, [user]);
 
   const addPhotoFrom = async (source: "camera" | "library") => {
     setError(null);
@@ -272,29 +353,118 @@ export function ProfileScreen({ userId, onSignOut }: { userId: string; onSignOut
         />
 
         <Text style={styles.sectionTitle}>Hobbies</Text>
-        <TextInput
-          style={styles.input}
-          value={hobbies}
-          onChangeText={setHobbies}
-          placeholder="Example: Running, Live music, Cooking"
-          placeholderTextColor={theme.colors.muted}
-        />
+        <Text style={styles.helper}>Pick a few and add your own.</Text>
+        <View style={styles.chipWrap}>
+          {HOBBY_OPTIONS.map((hobby) => (
+            <Pressable
+              key={hobby}
+              style={[styles.hobbyChip, selectedHobbies.includes(hobby) && styles.hobbyChipActive]}
+              onPress={() => toggleHobby(hobby)}
+            >
+              <Text
+                style={[styles.hobbyChipText, selectedHobbies.includes(hobby) && styles.hobbyChipTextActive]}
+              >
+                {hobby}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        <View style={styles.row}>
+          <TextInput
+            style={[styles.input, styles.flexInput]}
+            value={customHobby}
+            onChangeText={setCustomHobby}
+            placeholder="Add your own hobby"
+            placeholderTextColor={theme.colors.muted}
+          />
+          <Pressable style={styles.addBtn} onPress={addCustomHobby}>
+            <Text style={styles.addBtnText}>Add</Text>
+          </Pressable>
+        </View>
+        {selectedHobbies.length > 0 ? (
+          <View style={styles.selectedWrap}>
+            {selectedHobbies.map((hobby) => (
+              <Pressable key={`selected-${hobby}`} style={styles.selectedChip} onPress={() => toggleHobby(hobby)}>
+                <Text style={styles.selectedChipText}>{hobby}  ×</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Prompts</Text>
+        <Text style={styles.helper}>Choose 3 prompts and write your answers.</Text>
+
+        <Text style={styles.promptLabel}>Prompt 1</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.promptScroll}>
+          {PROMPT_OPTIONS.map((option) => (
+            <Pressable
+              key={`p1-${option}`}
+              style={[styles.promptChoice, promptOneQuestion === option && styles.promptChoiceActive]}
+              onPress={() => setPromptOneQuestion(option)}
+            >
+              <Text
+                style={[styles.promptChoiceText, promptOneQuestion === option && styles.promptChoiceTextActive]}
+              >
+                {option}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
         <TextInput
           style={styles.input}
           value={promptOne}
           onChangeText={setPromptOne}
-          placeholder="Prompt answer #1"
+          placeholder="Your answer..."
           placeholderTextColor={theme.colors.muted}
         />
+
+        <Text style={styles.promptLabel}>Prompt 2</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.promptScroll}>
+          {PROMPT_OPTIONS.map((option) => (
+            <Pressable
+              key={`p2-${option}`}
+              style={[styles.promptChoice, promptTwoQuestion === option && styles.promptChoiceActive]}
+              onPress={() => setPromptTwoQuestion(option)}
+            >
+              <Text
+                style={[styles.promptChoiceText, promptTwoQuestion === option && styles.promptChoiceTextActive]}
+              >
+                {option}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
         <TextInput
           style={styles.input}
           value={promptTwo}
           onChangeText={setPromptTwo}
-          placeholder="Prompt answer #2"
+          placeholder="Your answer..."
+          placeholderTextColor={theme.colors.muted}
+        />
+
+        <Text style={styles.promptLabel}>Prompt 3</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.promptScroll}>
+          {PROMPT_OPTIONS.map((option) => (
+            <Pressable
+              key={`p3-${option}`}
+              style={[styles.promptChoice, promptThreeQuestion === option && styles.promptChoiceActive]}
+              onPress={() => setPromptThreeQuestion(option)}
+            >
+              <Text
+                style={[styles.promptChoiceText, promptThreeQuestion === option && styles.promptChoiceTextActive]}
+              >
+                {option}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+        <TextInput
+          style={styles.input}
+          value={promptThree}
+          onChangeText={setPromptThree}
+          placeholder="Your answer..."
           placeholderTextColor={theme.colors.muted}
         />
       </View>
@@ -365,6 +535,85 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     gap: 8
+  },
+  flexInput: {
+    flex: 1
+  },
+  chipWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8
+  },
+  hobbyChip: {
+    backgroundColor: "#EFE8F8",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
+  hobbyChipActive: {
+    backgroundColor: theme.colors.primary
+  },
+  hobbyChipText: {
+    color: theme.colors.primary,
+    fontWeight: "700",
+    fontSize: 12
+  },
+  hobbyChipTextActive: {
+    color: "#fff"
+  },
+  addBtn: {
+    backgroundColor: theme.colors.primary,
+    borderRadius: theme.radius.sm,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  addBtnText: {
+    color: "#fff",
+    fontWeight: "700"
+  },
+  selectedWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8
+  },
+  selectedChip: {
+    backgroundColor: "#EDE7F6",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7
+  },
+  selectedChipText: {
+    color: theme.colors.primary,
+    fontWeight: "700",
+    fontSize: 12
+  },
+  promptLabel: {
+    color: theme.colors.text,
+    fontWeight: "700",
+    fontSize: 13,
+    marginTop: 4
+  },
+  promptScroll: {
+    gap: 8,
+    paddingRight: 10
+  },
+  promptChoice: {
+    backgroundColor: "#EFE8F8",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
+  promptChoiceActive: {
+    backgroundColor: theme.colors.primary
+  },
+  promptChoiceText: {
+    color: theme.colors.primary,
+    fontWeight: "700",
+    fontSize: 12
+  },
+  promptChoiceTextActive: {
+    color: "#fff"
   },
   radiusBtn: {
     flex: 1,

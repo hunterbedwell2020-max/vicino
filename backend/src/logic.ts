@@ -64,6 +64,7 @@ function mapUser(row: Record<string, unknown>) {
     hobbies: Array.isArray(row.hobbies) ? row.hobbies : [],
     promptOne: row.prompt_one ? String(row.prompt_one) : null,
     promptTwo: row.prompt_two ? String(row.prompt_two) : null,
+    promptThree: row.prompt_three ? String(row.prompt_three) : null,
     maxDistanceMiles: Number(row.max_distance_miles ?? 25)
   };
 }
@@ -82,7 +83,7 @@ async function getUser(userId: string) {
 async function getUserAny(userId: string) {
   const { rows } = await pool.query(
     `SELECT id, first_name, last_name, username, password_hash, is_admin, email, phone, age, gender, preferred_gender, likes, dislikes, bio, verified, photos,
-            hobbies, prompt_one, prompt_two,
+            hobbies, prompt_one, prompt_two, prompt_three,
             latitude, longitude, max_distance_miles,
             verification_status, verification_submitted_at,
             verification_reviewed_at, verification_reviewer_note
@@ -156,7 +157,7 @@ export async function listUsers() {
   const { rows } = await pool.query(
     `SELECT id, first_name, last_name, username, is_admin, email, phone, age, gender,
             preferred_gender, likes, dislikes, bio, verified, photos,
-            hobbies, prompt_one, prompt_two,
+            hobbies, prompt_one, prompt_two, prompt_three,
             latitude, longitude, max_distance_miles
      FROM users
      ORDER BY id`
@@ -188,7 +189,7 @@ export async function registerAuthUser(input: {
       )
       VALUES ($1, $2, $3, $4, $5, $6, 18, 'other', '', FALSE, 'unsubmitted', '[]'::jsonb, ARRAY[]::text[], 25)
       RETURNING id, first_name, last_name, username, is_admin, email, phone, age, gender, preferred_gender, likes, dislikes,
-                bio, verified, photos, hobbies, prompt_one, prompt_two, max_distance_miles`,
+                bio, verified, photos, hobbies, prompt_one, prompt_two, prompt_three, max_distance_miles`,
       [userId, username, "", username, passwordHash, input.email.trim().toLowerCase()]
     );
 
@@ -213,7 +214,7 @@ export async function loginAuthUser(username: string, password: string) {
   const normalized = username.trim().toLowerCase();
   const { rows } = await pool.query(
     `SELECT id, first_name, last_name, username, password_hash, is_admin, email, phone, age, gender, preferred_gender, likes, dislikes,
-            bio, verified, photos, hobbies, prompt_one, prompt_two, max_distance_miles
+            bio, verified, photos, hobbies, prompt_one, prompt_two, prompt_three, max_distance_miles
      FROM users
      WHERE username = $1`,
     [normalized]
@@ -240,7 +241,7 @@ export async function loginAuthUser(username: string, password: string) {
 export async function getAuthSession(token: string) {
   const { rows } = await pool.query(
     `SELECT u.id, u.first_name, u.last_name, u.username, u.is_admin, u.email, u.phone, u.age, u.gender, u.preferred_gender, u.likes, u.dislikes,
-            u.bio, u.verified, u.photos, u.hobbies, u.prompt_one, u.prompt_two, u.max_distance_miles,
+            u.bio, u.verified, u.photos, u.hobbies, u.prompt_one, u.prompt_two, u.prompt_three, u.max_distance_miles,
             u.verification_status, u.verification_submitted_at, u.verification_reviewed_at, u.verification_reviewer_note
      FROM auth_sessions s
      JOIN users u ON u.id = s.user_id
@@ -293,6 +294,7 @@ export async function updateUserProfile(
     hobbies?: string[];
     promptOne?: string;
     promptTwo?: string;
+    promptThree?: string;
   }
 ) {
   await getUserAny(userId);
@@ -313,6 +315,7 @@ export async function updateUserProfile(
   const hobbies = updates.hobbies ?? null;
   const promptOne = updates.promptOne?.trim() || null;
   const promptTwo = updates.promptTwo?.trim() || null;
+  const promptThree = updates.promptThree?.trim() || null;
 
   const { rows } = await pool.query(
     `UPDATE users
@@ -328,7 +331,8 @@ export async function updateUserProfile(
          photos = COALESCE($11::jsonb, photos),
          hobbies = COALESCE($12::text[], hobbies),
          prompt_one = COALESCE($13, prompt_one),
-         prompt_two = COALESCE($14, prompt_two)
+         prompt_two = COALESCE($14, prompt_two),
+         prompt_three = COALESCE($15, prompt_three)
      WHERE id = $1
      RETURNING id,
                first_name AS "firstName",
@@ -345,6 +349,7 @@ export async function updateUserProfile(
                hobbies,
                prompt_one AS "promptOne",
                prompt_two AS "promptTwo",
+               prompt_three AS "promptThree",
                max_distance_miles AS "maxDistanceMiles"`,
     [
       userId,
@@ -360,7 +365,8 @@ export async function updateUserProfile(
       photos ? JSON.stringify(photos) : null,
       hobbies,
       promptOne,
-      promptTwo
+      promptTwo,
+      promptThree
     ]
   );
 

@@ -171,6 +171,7 @@ export async function initDb() {
       hobbies TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
       prompt_one TEXT NULL,
       prompt_two TEXT NULL,
+      prompt_three TEXT NULL,
       verified BOOLEAN NOT NULL DEFAULT FALSE,
       verification_status TEXT NOT NULL DEFAULT 'unsubmitted' CHECK (
         verification_status IN ('unsubmitted', 'pending', 'approved', 'rejected')
@@ -201,6 +202,7 @@ export async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS hobbies TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
     ALTER TABLE users ADD COLUMN IF NOT EXISTS prompt_one TEXT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS prompt_two TEXT NULL;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS prompt_three TEXT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_status TEXT NOT NULL DEFAULT 'unsubmitted';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_submitted_at TIMESTAMPTZ NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_reviewed_at TIMESTAMPTZ NULL;
@@ -312,10 +314,10 @@ export async function initDb() {
     await pool.query(
       `INSERT INTO users (
          id, first_name, last_name, email, phone, age, gender, preferred_gender, likes, dislikes,
-         bio, hobbies, prompt_one, prompt_two, verified, photos,
+         bio, hobbies, prompt_one, prompt_two, prompt_three, verified, photos,
          latitude, longitude, last_location_at, max_distance_miles
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::text[], $13, $14, $15, $16::jsonb, $17, $18, NOW(), $19)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::text[], $13, $14, $15, $16, $17::jsonb, $18, $19, NOW(), $20)
        ON CONFLICT (id) DO UPDATE
        SET first_name = EXCLUDED.first_name,
            last_name = EXCLUDED.last_name,
@@ -330,6 +332,7 @@ export async function initDb() {
            hobbies = EXCLUDED.hobbies,
            prompt_one = EXCLUDED.prompt_one,
            prompt_two = EXCLUDED.prompt_two,
+           prompt_three = EXCLUDED.prompt_three,
            verified = EXCLUDED.verified,
            verification_status = CASE WHEN EXCLUDED.verified = TRUE THEN 'approved' ELSE 'unsubmitted' END,
            verification_submitted_at = NULL,
@@ -355,6 +358,7 @@ export async function initDb() {
         user.hobbies,
         user.prompt_one,
         user.prompt_two,
+        null,
         user.verified,
         JSON.stringify(user.photos),
         user.latitude,
@@ -369,14 +373,14 @@ export async function initDb() {
     `INSERT INTO users (
       id, first_name, last_name, username, password_hash, is_admin, email,
       age, gender, preferred_gender, likes, dislikes, bio,
-      hobbies, prompt_one, prompt_two, verified, verification_status,
+      hobbies, prompt_one, prompt_two, prompt_three, verified, verification_status,
       photos, latitude, longitude, last_location_at, max_distance_miles
     )
     VALUES (
       'u_admin', 'Hunter', 'Bedwell', $1, $2, TRUE, $3,
       30, 'male', 'female', 'Intentional dating', 'Dishonesty', 'Founder account.',
       ARRAY['Building Vicino']::text[], 'Building a safer way to meet nearby.',
-      'Public-first meetups only.', TRUE, 'approved',
+      'Public-first meetups only.', null, TRUE, 'approved',
       '[]'::jsonb, NULL, NULL, NOW(), 25
     )
     ON CONFLICT (id) DO UPDATE

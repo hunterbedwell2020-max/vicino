@@ -303,7 +303,8 @@ app.post("/users/:userId/profile", async (req, res) => {
     photos: z.array(z.string().url()).max(9).optional(),
     hobbies: z.array(z.string().min(1).max(40)).max(12).optional(),
     promptOne: z.string().min(1).max(280).optional(),
-    promptTwo: z.string().min(1).max(280).optional()
+    promptTwo: z.string().min(1).max(280).optional(),
+    promptThree: z.string().min(1).max(280).optional()
   });
 
   const parsed = schema.safeParse(req.body);

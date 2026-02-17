@@ -61,6 +61,7 @@ export interface ApiUser {
   hobbies?: string[];
   promptOne?: string | null;
   promptTwo?: string | null;
+  promptThree?: string | null;
   distanceMiles?: number;
   maxDistanceMiles?: number;
 }
@@ -258,6 +259,7 @@ export function postUserProfile(
     hobbies?: string[];
     promptOne?: string;
     promptTwo?: string;
+    promptThree?: string;
   }
 ) {
   return request<ApiUser>(`/users/${userId}/profile`, {
