@@ -776,11 +776,6 @@ export async function setMeetDecision(matchId: string, userId: string, decision:
   const match = await getMatchById(matchId);
   requireMatchMember(match, userId);
 
-  const counts = await getMessageCounts(matchId);
-  if (counts.total < MAX_MESSAGES_TOTAL) {
-    throw new Error("Meet decision unlocks only after the 60-message cap");
-  }
-
   await pool.query(
     `INSERT INTO meet_decisions (match_id, user_id, decision, created_at)
      VALUES ($1, $2, $3, NOW())
