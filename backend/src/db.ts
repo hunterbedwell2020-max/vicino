@@ -405,8 +405,34 @@ export async function initDb() {
     `INSERT INTO swipes (from_user_id, to_user_id, decision, created_at)
      VALUES
        ('u2', 'u1', 'right', NOW()),
-       ('u3', 'u1', 'right', NOW())
+       ('u3', 'u1', 'right', NOW()),
+       ('u_admin', 'u2', 'right', NOW()),
+       ('u2', 'u_admin', 'right', NOW()),
+       ('u_admin', 'u4', 'right', NOW()),
+       ('u4', 'u_admin', 'right', NOW())
      ON CONFLICT (from_user_id, to_user_id)
      DO UPDATE SET decision = EXCLUDED.decision`
+  );
+
+  await pool.query(
+    `INSERT INTO matches (id, user_a_id, user_b_id, created_at)
+     SELECT 'match_seed_admin_u2', 'u_admin', 'u2', NOW()
+     WHERE NOT EXISTS (
+       SELECT 1
+       FROM matches
+       WHERE (user_a_id = 'u_admin' AND user_b_id = 'u2')
+          OR (user_a_id = 'u2' AND user_b_id = 'u_admin')
+     )`
+  );
+
+  await pool.query(
+    `INSERT INTO matches (id, user_a_id, user_b_id, created_at)
+     SELECT 'match_seed_admin_u4', 'u_admin', 'u4', NOW()
+     WHERE NOT EXISTS (
+       SELECT 1
+       FROM matches
+       WHERE (user_a_id = 'u_admin' AND user_b_id = 'u4')
+          OR (user_a_id = 'u4' AND user_b_id = 'u_admin')
+     )`
   );
 }
