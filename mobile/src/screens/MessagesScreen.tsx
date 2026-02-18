@@ -6,6 +6,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
@@ -13,6 +14,9 @@ import {
 } from "react-native";
 import { theme } from "../theme";
 import type { MatchPreview, MeetDecision } from "../types";
+
+const FONT_REGULAR = "Satoshi-Regular";
+const FONT_MEDIUM = "Satoshi-Medium";
 
 export function MessagesScreen({
   matches,
@@ -24,7 +28,10 @@ export function MessagesScreen({
   sendAutoReply,
   messageCapReached,
   setMeetDecision,
-  bothMeetYes
+  bothMeetYes,
+  showDevTools = false,
+  refreshing = false,
+  onRefresh
 }: {
   matches: MatchPreview[];
   activeMatch: MatchPreview | null;
@@ -40,6 +47,9 @@ export function MessagesScreen({
   messageCapReached: (match: MatchPreview) => boolean;
   setMeetDecision: (matchId: string, user: "me" | "them", decision: MeetDecision) => Promise<void>;
   bothMeetYes: (match: MatchPreview) => boolean;
+  showDevTools?: boolean;
+  refreshing?: boolean;
+  onRefresh?: () => void;
 }) {
   const [compose, setCompose] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -47,11 +57,48 @@ export function MessagesScreen({
 
   const capReached = activeMatch ? messageCapReached(activeMatch) : false;
 
-  const shouldForceDecision = Boolean(
-    activeMatch &&
-      capReached &&
-      (activeMatch.meetDecisionByMe === null || activeMatch.meetDecisionByThem === null)
-  );
+  const shouldForceDecision = Boolean(activeMatch && capReached && activeMatch.meetDecisionByMe === null);
+
+  const formatInboxTime = (value?: string) => {
+    if (!value) {
+      return "";
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return "";
+    }
+    const now = new Date();
+    if (date.toDateString() === now.toDateString()) {
+      return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    }
+    const daysAgo = (now.getTime() - date.getTime()) / (24 * 60 * 60 * 1000);
+    if (daysAgo < 7) {
+      return date.toLocaleDateString([], { weekday: "short" });
+    }
+    return date.toLocaleDateString([], { month: "numeric", day: "numeric" });
+  };
+
+  const sortedMatches = useMemo(() => {
+    const rows = [...matches];
+    rows.sort((a, b) => {
+      const aLast = a.chat[a.chat.length - 1] ?? null;
+      const bLast = b.chat[b.chat.length - 1] ?? null;
+      const aAwaiting = Boolean(aLast && aLast.sender === "them" && !messageCapReached(a));
+      const bAwaiting = Boolean(bLast && bLast.sender === "them" && !messageCapReached(b));
+      if (aAwaiting !== bAwaiting) {
+        return aAwaiting ? -1 : 1;
+      }
+
+      const aTime = aLast ? new Date(aLast.createdAt).getTime() : 0;
+      const bTime = bLast ? new Date(bLast.createdAt).getTime() : 0;
+      if (aTime !== bTime) {
+        return bTime - aTime;
+      }
+
+      return a.name.localeCompare(b.name);
+    });
+    return rows;
+  }, [matches, messageCapReached]);
 
   const meetSummary = useMemo(() => {
     if (!activeMatch) {
@@ -78,29 +125,31 @@ export function MessagesScreen({
           </View>
         </View>
 
-        <View style={styles.promptRow}>
-          <Text style={styles.promptLabel}>Simulate their answer:</Text>
-          <View style={styles.promptActions}>
-            <Pressable
-              style={[styles.promptBtn, activeMatch.meetDecisionByThem === "yes" && styles.promptBtnYes]}
-              onPress={() => setMeetDecision(activeMatch.id, "them", "yes")}
-            >
-              <Text style={styles.promptBtnText}>Yes</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.promptBtn, activeMatch.meetDecisionByThem === "no" && styles.promptBtnNo]}
-              onPress={() => setMeetDecision(activeMatch.id, "them", "no")}
-            >
-              <Text style={styles.promptBtnText}>No</Text>
-            </Pressable>
+        {showDevTools ? (
+          <View style={styles.promptRow}>
+            <Text style={styles.promptLabel}>Simulate their answer:</Text>
+            <View style={styles.promptActions}>
+              <Pressable
+                style={[styles.promptBtn, activeMatch.meetDecisionByThem === "yes" && styles.promptBtnYes]}
+                onPress={() => setMeetDecision(activeMatch.id, "them", "yes")}
+              >
+                <Text style={styles.promptBtnText}>Yes</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.promptBtn, activeMatch.meetDecisionByThem === "no" && styles.promptBtnNo]}
+                onPress={() => setMeetDecision(activeMatch.id, "them", "no")}
+              >
+                <Text style={styles.promptBtnText}>No</Text>
+              </Pressable>
+            </View>
           </View>
-        </View>
+        ) : null}
 
         <Text style={styles.promptStatus}>
           {bothMeetYes(activeMatch)
             ? "Both selected YES. This match is now eligible for the 'I am out and open to meeting' flow."
             : capReached
-              ? "Both responses are required before out-tonight eligibility."
+              ? "Your answer is saved. Waiting for the other person to answer."
               : "You can answer now or later. Both YES is required for out-tonight eligibility."}
         </Text>
       </View>
@@ -145,29 +194,31 @@ export function MessagesScreen({
               </View>
             </View>
 
-            <View style={styles.promptRow}>
-              <Text style={styles.promptLabel}>Simulate their answer:</Text>
-              <View style={styles.promptActions}>
-                <Pressable
-                  style={[
-                    styles.promptBtn,
-                    activeMatch.meetDecisionByThem === "yes" && styles.promptBtnYes
-                  ]}
-                  onPress={() => setMeetDecision(activeMatch.id, "them", "yes")}
-                >
-                  <Text style={styles.promptBtnText}>Yes</Text>
-                </Pressable>
-                <Pressable
-                  style={[
-                    styles.promptBtn,
-                    activeMatch.meetDecisionByThem === "no" && styles.promptBtnNo
-                  ]}
-                  onPress={() => setMeetDecision(activeMatch.id, "them", "no")}
-                >
-                  <Text style={styles.promptBtnText}>No</Text>
-                </Pressable>
+            {showDevTools ? (
+              <View style={styles.promptRow}>
+                <Text style={styles.promptLabel}>Simulate their answer:</Text>
+                <View style={styles.promptActions}>
+                  <Pressable
+                    style={[
+                      styles.promptBtn,
+                      activeMatch.meetDecisionByThem === "yes" && styles.promptBtnYes
+                    ]}
+                    onPress={() => setMeetDecision(activeMatch.id, "them", "yes")}
+                  >
+                    <Text style={styles.promptBtnText}>Yes</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      styles.promptBtn,
+                      activeMatch.meetDecisionByThem === "no" && styles.promptBtnNo
+                    ]}
+                    onPress={() => setMeetDecision(activeMatch.id, "them", "no")}
+                  >
+                    <Text style={styles.promptBtnText}>No</Text>
+                  </Pressable>
+                </View>
               </View>
-            </View>
+            ) : null}
           </View>
         </View>
       </Modal>
@@ -195,13 +246,17 @@ export function MessagesScreen({
   if (!activeMatch) {
     return (
       <FlatList
-        data={matches}
+        data={sortedMatches}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listWrap}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         renderItem={({ item }) => {
+          const lastMessage = item.chat[item.chat.length - 1] ?? null;
+          const timestamp = formatInboxTime(lastMessage?.createdAt);
           const total = item.messagesUsedByMe + item.messagesUsedByThem;
           const isCapped = messageCapReached(item);
-          const preview = item.chat[item.chat.length - 1]?.body ?? "No messages yet.";
+          const preview = lastMessage?.body ?? "No messages yet.";
+          const awaitingReply = Boolean(lastMessage && lastMessage.sender === "them" && !isCapped);
           return (
             <Pressable style={styles.listCard} onPress={() => openChat(item.id)}>
               <View style={styles.listRow}>
@@ -215,10 +270,23 @@ export function MessagesScreen({
                   )}
                 </Pressable>
                 <View style={styles.listTextWrap}>
-                  <Text style={styles.name}>{item.name}</Text>
-                  <Text style={styles.preview}>{preview}</Text>
-                  <Text style={styles.meta}>Messages: {total}/60</Text>
-                  {isCapped ? <Text style={styles.cappedLabel}>Messages Capped</Text> : null}
+                  <View style={styles.nameRow}>
+                    <Text style={styles.name}>{item.name}</Text>
+                    {timestamp ? <Text style={styles.timeText}>{timestamp}</Text> : null}
+                  </View>
+                  <View style={styles.previewRow}>
+                    {awaitingReply ? <View style={styles.unreadDot} /> : null}
+                    <Text
+                      style={[styles.preview, awaitingReply && styles.previewUnread]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {preview}
+                    </Text>
+                  </View>
+                  <Text style={styles.meta}>
+                    {awaitingReply ? "Awaiting your reply" : isCapped ? "Messages capped" : `Messages: ${total}/60`}
+                  </Text>
                 </View>
               </View>
             </Pressable>
@@ -282,6 +350,7 @@ export function MessagesScreen({
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.chatList}
         style={styles.chatListSurface}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         keyboardShouldPersistTaps="handled"
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
         renderItem={({ item }) => (
@@ -312,9 +381,11 @@ export function MessagesScreen({
             </Pressable>
           </View>
           <View style={styles.composeActions}>
-            <Pressable style={[styles.composeBtn, styles.replyBtn]} onPress={sendTheirs}>
-              <Text style={styles.composeBtnText}>Sim Reply</Text>
-            </Pressable>
+            {showDevTools ? (
+              <Pressable style={[styles.composeBtn, styles.replyBtn]} onPress={sendTheirs}>
+                <Text style={styles.composeBtnText}>Sim Reply</Text>
+              </Pressable>
+            ) : null}
           </View>
         </View>
       )}
@@ -325,11 +396,14 @@ export function MessagesScreen({
 }
 
 const styles = StyleSheet.create({
-  listWrap: { gap: 10, paddingBottom: 8 },
+  listWrap: { gap: 8, paddingBottom: 8 },
   listCard: {
     backgroundColor: theme.colors.card,
     borderRadius: theme.radius.md,
-    padding: 14,
+    borderWidth: 1,
+    borderColor: "#EADCF8",
+    paddingVertical: 12,
+    paddingHorizontal: 12,
     gap: 4
   },
   listRow: {
@@ -339,6 +413,12 @@ const styles = StyleSheet.create({
   },
   listTextWrap: {
     flex: 1
+  },
+  nameRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8
   },
   avatar: {
     width: 48,
@@ -357,21 +437,47 @@ const styles = StyleSheet.create({
   avatarFallbackText: {
     color: theme.colors.primary,
     fontWeight: "800",
-    fontSize: 18
+    fontSize: 18,
+    fontFamily: FONT_REGULAR
   },
-  name: { fontWeight: "700", fontSize: 18, color: theme.colors.text },
-  preview: { color: theme.colors.muted },
-  meta: { color: theme.colors.primary, fontWeight: "600", marginTop: 4 },
-  cappedLabel: { color: theme.colors.danger, fontWeight: "700", marginTop: 2 },
+  name: { fontWeight: "700", fontSize: 17, color: theme.colors.text, fontFamily: FONT_REGULAR },
+  timeText: {
+    color: theme.colors.muted,
+    fontSize: 12,
+    fontWeight: "600",
+    fontFamily: FONT_MEDIUM
+  },
+  previewRow: {
+    marginTop: 2,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6
+  },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: theme.colors.primary
+  },
+  preview: { color: theme.colors.muted, flex: 1, fontSize: 13, fontFamily: FONT_MEDIUM },
+  previewUnread: {
+    color: theme.colors.text,
+    fontWeight: "600",
+    fontFamily: FONT_REGULAR
+  },
+  meta: { color: theme.colors.primary, fontWeight: "600", marginTop: 4, fontSize: 12, fontFamily: FONT_MEDIUM },
 
   chatWrap: { gap: 10, flex: 1 },
   chatHeader: {
     backgroundColor: theme.colors.card,
     borderRadius: theme.radius.md,
-    padding: 12,
+    borderWidth: 1,
+    borderColor: "#EADCF8",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     gap: 4
   },
-  back: { color: theme.colors.primary, fontWeight: "700" },
+  back: { color: theme.colors.primary, fontWeight: "700", fontFamily: FONT_REGULAR },
   headerIdentity: {
     flexDirection: "row",
     gap: 8,
@@ -393,13 +499,16 @@ const styles = StyleSheet.create({
   },
   headerAvatarFallbackText: {
     color: theme.colors.primary,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: FONT_REGULAR
   },
-  chatName: { color: theme.colors.text, fontSize: 18, fontWeight: "700" },
-  counts: { color: theme.colors.muted },
+  chatName: { color: theme.colors.text, fontSize: 18, fontWeight: "700", fontFamily: FONT_REGULAR },
+  counts: { color: theme.colors.muted, fontSize: 12, fontFamily: FONT_MEDIUM },
   chatListSurface: {
     backgroundColor: theme.colors.card,
     borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: "#EADCF8",
     flex: 1,
     minHeight: 0
   },
@@ -421,19 +530,21 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     backgroundColor: "#EDE7F6"
   },
-  bubbleText: { color: theme.colors.text },
-  myBubbleText: { color: "#fff" },
+  bubbleText: { color: theme.colors.text, fontFamily: FONT_MEDIUM },
+  myBubbleText: { color: "#fff", fontFamily: FONT_MEDIUM },
 
   promptCard: {
     backgroundColor: theme.colors.card,
     borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: "#EADCF8",
     padding: 12,
     gap: 10
   },
-  promptTitle: { color: theme.colors.text, fontSize: 16, fontWeight: "700" },
-  modalSub: { color: theme.colors.muted, marginTop: 6, marginBottom: 6 },
+  promptTitle: { color: theme.colors.text, fontSize: 16, fontWeight: "700", fontFamily: FONT_REGULAR },
+  modalSub: { color: theme.colors.muted, marginTop: 6, marginBottom: 6, fontFamily: FONT_MEDIUM },
   promptRow: { gap: 6 },
-  promptLabel: { color: theme.colors.muted },
+  promptLabel: { color: theme.colors.muted, fontFamily: FONT_MEDIUM },
   promptActions: { flexDirection: "row", gap: 8 },
   promptBtn: {
     flex: 1,
@@ -444,12 +555,14 @@ const styles = StyleSheet.create({
   },
   promptBtnYes: { backgroundColor: theme.colors.success },
   promptBtnNo: { backgroundColor: theme.colors.danger },
-  promptBtnText: { color: "#fff", fontWeight: "700" },
-  promptStatus: { color: theme.colors.text },
+  promptBtnText: { color: "#fff", fontWeight: "700", fontFamily: FONT_REGULAR },
+  promptStatus: { color: theme.colors.text, fontSize: 13, lineHeight: 18, fontFamily: FONT_MEDIUM },
 
   composeWrap: {
     backgroundColor: theme.colors.card,
     borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: "#EADCF8",
     padding: 12,
     gap: 8,
     marginBottom: 4
@@ -465,7 +578,8 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.sm,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    color: theme.colors.text
+    color: theme.colors.text,
+    fontFamily: FONT_MEDIUM
   },
   sendFab: {
     width: 42,
@@ -479,7 +593,8 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 17,
     fontWeight: "700",
-    marginLeft: 1
+    marginLeft: 1,
+    fontFamily: FONT_REGULAR
   },
   composeActions: { flexDirection: "row", gap: 8 },
   composeBtn: {
@@ -487,11 +602,11 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.primary,
     borderRadius: theme.radius.sm,
     alignItems: "center",
-    paddingVertical: 10
+    paddingVertical: 9
   },
   replyBtn: { backgroundColor: theme.colors.primaryLight },
-  composeBtnText: { color: "#fff", fontWeight: "700" },
-  error: { color: theme.colors.danger, fontWeight: "600" },
+  composeBtnText: { color: "#fff", fontWeight: "700", fontFamily: FONT_REGULAR },
+  error: { color: theme.colors.danger, fontWeight: "600", fontFamily: FONT_MEDIUM },
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.42)",
@@ -501,6 +616,8 @@ const styles = StyleSheet.create({
   modalCard: {
     backgroundColor: theme.colors.card,
     borderRadius: theme.radius.lg,
+    borderWidth: 1,
+    borderColor: "#EADCF8",
     padding: 14,
     gap: 10
   }

@@ -8,8 +8,13 @@ type AccessTokenPayload = {
   exp: number;
 };
 
-const DEFAULT_ACCESS_SECRET = "vicino-dev-access-secret-change-me-immediately";
-const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET?.trim() || DEFAULT_ACCESS_SECRET;
+const ACCESS_SECRET = (() => {
+  const value = process.env.JWT_ACCESS_SECRET?.trim();
+  if (!value || value.length < 32) {
+    throw new Error("JWT_ACCESS_SECRET must be set and at least 32 characters.");
+  }
+  return value;
+})();
 const ACCESS_TTL_SECONDS = Math.max(300, Number(process.env.JWT_ACCESS_TTL_SECONDS ?? 86400));
 
 function base64UrlEncode(value: Buffer | string) {

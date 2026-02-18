@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import Slider from "@react-native-community/slider";
 import { getUsers, postDistancePreference, postUserProfile, uploadImageBase64, type ApiUser } from "../api";
 import { theme } from "../theme";
+const FONT_REGULAR = "Satoshi-Regular";
+const FONT_MEDIUM = "Satoshi-Medium";
 
 const PHOTO_SLOTS = 9;
 const GENDER_OPTIONS = ["male", "female", "other"] as const;
@@ -105,10 +108,6 @@ export function ProfileScreen({
   useEffect(() => {
     void loadProfile();
   }, [userId]);
-
-  const adjustRadius = (delta: number) => {
-    setRadiusMiles((prev) => Math.max(1, Math.min(150, prev + delta)));
-  };
 
   const saveSettings = async () => {
     setStatusText(null);
@@ -577,13 +576,21 @@ export function ProfileScreen({
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Settings</Text>
         <Text style={styles.item}>Discovery radius: {radiusMiles} miles</Text>
-        <View style={styles.row}>
-          <Pressable style={styles.radiusBtn} onPress={() => adjustRadius(-5)}>
-            <Text style={styles.radiusBtnText}>-5</Text>
-          </Pressable>
-          <Pressable style={styles.radiusBtn} onPress={() => adjustRadius(5)}>
-            <Text style={styles.radiusBtnText}>+5</Text>
-          </Pressable>
+        <View style={styles.sliderWrap}>
+          <Slider
+            value={radiusMiles}
+            minimumValue={1}
+            maximumValue={150}
+            step={1}
+            minimumTrackTintColor={theme.colors.primary}
+            maximumTrackTintColor="#D8C6ED"
+            thumbTintColor={theme.colors.primary}
+            onValueChange={(value: number) => setRadiusMiles(Math.round(value))}
+          />
+          <View style={styles.sliderScaleRow}>
+            <Text style={styles.sliderScaleLabel}>1 mi</Text>
+            <Text style={styles.sliderScaleLabel}>150 mi</Text>
+          </View>
         </View>
 
         <Pressable
@@ -687,27 +694,32 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 22,
     fontWeight: "700",
-    color: theme.colors.text
+    color: theme.colors.text,
+    fontFamily: FONT_REGULAR
   },
   sectionTitle: {
     color: theme.colors.text,
     fontWeight: "700",
-    fontSize: 16
+    fontSize: 16,
+    fontFamily: FONT_REGULAR
   },
   item: {
     color: theme.colors.muted,
-    lineHeight: 20
+    lineHeight: 20,
+    fontFamily: FONT_MEDIUM
   },
   helper: {
     color: theme.colors.muted,
-    fontSize: 12
+    fontSize: 12,
+    fontFamily: FONT_MEDIUM
   },
   input: {
     backgroundColor: "#F2ECF8",
     borderRadius: theme.radius.sm,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    color: theme.colors.text
+    color: theme.colors.text,
+    fontFamily: FONT_MEDIUM
   },
   multiline: {
     minHeight: 88,
@@ -726,18 +738,21 @@ const styles = StyleSheet.create({
     gap: 8
   },
   hobbyChip: {
-    backgroundColor: "#EFE8F8",
+    backgroundColor: "#F6F1FB",
+    borderWidth: 1,
+    borderColor: "#E5D8F2",
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8
+    paddingHorizontal: 11,
+    paddingVertical: 7
   },
   hobbyChipActive: {
     backgroundColor: theme.colors.primary
   },
   hobbyChipText: {
     color: theme.colors.primary,
-    fontWeight: "700",
-    fontSize: 12
+    fontWeight: "600",
+    fontSize: 11,
+    fontFamily: FONT_MEDIUM
   },
   hobbyChipTextActive: {
     color: "#fff"
@@ -751,7 +766,8 @@ const styles = StyleSheet.create({
   },
   addBtnText: {
     color: "#fff",
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR
   },
   selectedWrap: {
     flexDirection: "row",
@@ -759,39 +775,46 @@ const styles = StyleSheet.create({
     gap: 8
   },
   selectedChip: {
-    backgroundColor: "#EDE7F6",
+    backgroundColor: "#F4EEF9",
+    borderWidth: 1,
+    borderColor: "#E5D8F2",
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 7
+    paddingHorizontal: 11,
+    paddingVertical: 6
   },
   selectedChipText: {
     color: theme.colors.primary,
-    fontWeight: "700",
-    fontSize: 12
+    fontWeight: "600",
+    fontSize: 11,
+    fontFamily: FONT_MEDIUM
   },
   promptLabel: {
     color: theme.colors.text,
     fontWeight: "700",
     fontSize: 13,
-    marginTop: 4
+    marginTop: 4,
+    fontFamily: FONT_REGULAR
   },
   promptScroll: {
     gap: 8,
     paddingRight: 10
   },
   promptChoice: {
-    backgroundColor: "#EFE8F8",
+    backgroundColor: "#F6F1FB",
+    borderWidth: 1,
+    borderColor: "#E5D8F2",
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8
+    paddingHorizontal: 11,
+    paddingVertical: 7
   },
   promptChoiceActive: {
     backgroundColor: theme.colors.primary
   },
   promptChoiceText: {
     color: theme.colors.primary,
-    fontWeight: "700",
-    fontSize: 12
+    fontWeight: "600",
+    fontSize: 11,
+    fontFamily: FONT_MEDIUM
   },
   promptChoiceTextActive: {
     color: "#fff"
@@ -805,7 +828,25 @@ const styles = StyleSheet.create({
   },
   radiusBtnText: {
     color: theme.colors.primary,
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR
+  },
+  sliderWrap: {
+    backgroundColor: "#F6F1FB",
+    borderRadius: theme.radius.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 6
+  },
+  sliderScaleRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: -2
+  },
+  sliderScaleLabel: {
+    color: theme.colors.muted,
+    fontSize: 12,
+    fontWeight: "600",
+    fontFamily: FONT_MEDIUM
   },
   photoBtn: {
     flex: 1,
@@ -816,7 +857,8 @@ const styles = StyleSheet.create({
   },
   photoBtnText: {
     color: "#fff",
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR
   },
   choiceBtn: {
     flex: 1,
@@ -831,7 +873,8 @@ const styles = StyleSheet.create({
   choiceText: {
     color: theme.colors.primary,
     fontWeight: "700",
-    textTransform: "capitalize"
+    textTransform: "capitalize",
+    fontFamily: FONT_REGULAR
   },
   choiceTextActive: {
     color: "#fff"
@@ -858,7 +901,8 @@ const styles = StyleSheet.create({
   profilePhotoFallbackText: {
     color: theme.colors.primary,
     fontWeight: "800",
-    fontSize: 24
+    fontSize: 24,
+    fontFamily: FONT_REGULAR
   },
   profilePhotoActions: {
     flex: 1,
@@ -872,7 +916,8 @@ const styles = StyleSheet.create({
   },
   removeAvatarBtnText: {
     color: "#B42318",
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR
   },
   photoSlot: {
     borderRadius: theme.radius.sm,
@@ -893,7 +938,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#F6F1FB"
   },
   photoPlaceholderText: {
-    color: theme.colors.muted
+    color: theme.colors.muted,
+    fontFamily: FONT_MEDIUM
   },
   removeBtn: {
     backgroundColor: "#FBEAEA",
@@ -902,7 +948,8 @@ const styles = StyleSheet.create({
   },
   removeBtnText: {
     color: "#B42318",
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR
   },
   saveBtn: {
     marginTop: 4,
@@ -913,7 +960,8 @@ const styles = StyleSheet.create({
   },
   saveText: {
     color: "#fff",
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR
   },
   previewBtn: {
     marginTop: 4,
@@ -924,7 +972,8 @@ const styles = StyleSheet.create({
   },
   previewBtnText: {
     color: theme.colors.primary,
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR
   },
   signOutBtn: {
     marginTop: 6,
@@ -935,15 +984,18 @@ const styles = StyleSheet.create({
   },
   signOutText: {
     color: theme.colors.primary,
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR
   },
   success: {
     color: theme.colors.success,
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR
   },
   error: {
     color: theme.colors.danger,
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR
   },
   previewWrap: {
     flex: 1,
@@ -960,11 +1012,13 @@ const styles = StyleSheet.create({
   previewTitle: {
     color: theme.colors.text,
     fontSize: 20,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: FONT_REGULAR
   },
   previewClose: {
     color: theme.colors.primary,
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR
   },
   previewContent: {
     gap: 10,
@@ -986,7 +1040,8 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   previewHeroFallbackText: {
-    color: theme.colors.muted
+    color: theme.colors.muted,
+    fontFamily: FONT_MEDIUM
   },
   previewCard: {
     backgroundColor: theme.colors.card,
@@ -997,16 +1052,20 @@ const styles = StyleSheet.create({
   previewName: {
     color: theme.colors.text,
     fontSize: 22,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: FONT_REGULAR
   },
   previewBio: {
-    color: theme.colors.muted
+    color: theme.colors.muted,
+    fontFamily: FONT_MEDIUM
   },
   previewQuestion: {
     color: theme.colors.text,
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR
   },
   previewAnswer: {
-    color: theme.colors.muted
+    color: theme.colors.muted,
+    fontFamily: FONT_MEDIUM
   }
 });

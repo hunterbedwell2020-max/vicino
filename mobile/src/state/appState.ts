@@ -13,6 +13,7 @@ import {
   postOffer,
   postOfferRespond,
   postSwipe,
+  postAnalyticsEvent,
   type ApiMatch,
   type ApiOffer,
   type ApiUser,
@@ -137,6 +138,7 @@ export function useVicinoState(currentUserId: string | null) {
   const [acknowledgedMatchIds, setAcknowledgedMatchIds] = useState<Set<string>>(new Set());
   const [matchToastName, setMatchToastName] = useState<string | null>(null);
   const [outTonight, setOutTonight] = useState<OutTonightState>(emptyOutTonight);
+  const [swipeError, setSwipeError] = useState<string | null>(null);
 
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const outTonightSyncRef = useRef<number>(0);
@@ -172,6 +174,13 @@ export function useVicinoState(currentUserId: string | null) {
 
     const discovery = await getDiscovery(currentUserId);
     setDeck(discovery.map(toDeckCard));
+  };
+
+  const refreshAll = async () => {
+    await refreshFromApi().catch(() => null);
+    if (outTonight.sessionId) {
+      await refreshOutTonightState(outTonight.sessionId).catch(() => null);
+    }
   };
 
   const refreshOutTonightState = async (sessionId?: string | null) => {
@@ -234,6 +243,7 @@ export function useVicinoState(currentUserId: string | null) {
     }
 
     setDeck((prev) => prev.slice(1));
+    setSwipeError(null);
 
     void postSwipe(currentUserId, current.id, decision)
       .then((result) => {
@@ -248,7 +258,19 @@ export function useVicinoState(currentUserId: string | null) {
         }
         return refreshFromApi();
       })
-      .catch(() => {
+      .catch((err) => {
+        const raw = (err as Error).message ?? "";
+        const message =
+          raw && raw.toLowerCase().includes("daily swipe limit")
+            ? raw
+            : "Unable to complete swipe. Please try again.";
+        setSwipeError(message);
+        if (raw.toLowerCase().includes("daily swipe limit") && currentUserId) {
+          void postAnalyticsEvent("hit_free_swipe_limit", currentUserId, {
+            source: "swipe",
+            profileId: current.id
+          }).catch(() => null);
+        }
         // If swipe write fails, put the card back so user can retry.
         setDeck((prev) => [current, ...prev]);
       });
@@ -566,6 +588,8 @@ export function useVicinoState(currentUserId: string | null) {
     activeChatMatch,
     eligibleOutMatches,
     outTonight,
+    swipeError,
+    clearSwipeError: () => setSwipeError(null),
     unseenMatchCount,
     matchToastName,
     stats,
@@ -582,6 +606,7 @@ export function useVicinoState(currentUserId: string | null) {
     sendMeetOffer,
     respondToMeetOffer,
     syncMeetupTimers,
+    refreshAll,
     getProfileCardByMatchId,
     openChat,
     closeChat: () => setActiveChatMatchId(null)

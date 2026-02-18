@@ -38,7 +38,8 @@
         {
           "locationWhenInUsePermission": "Vicino uses your location to show nearby profiles and meetups."
         }
-      ]
+      ],
+      "expo-font"
     ]
   }
 }
