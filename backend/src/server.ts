@@ -15,7 +15,9 @@ import {
   purgeExpiredVerificationSubmissions,
   expireLocationIfNeeded,
   getAvailabilityState,
+  getLatestVerificationSubmissionForUser,
   getVerificationStatus,
+  listAdminUsers,
   listInterestedCandidates,
   listMatches,
   listDiscoveryProfiles,
@@ -310,6 +312,34 @@ app.get("/admin/verifications", adminRateLimit, requireAdminAccess, async (req, 
   const offset = Math.max(0, Number(req.query.offset ?? 0));
   try {
     const rows = await listVerificationQueue(validStatus, { limit, offset });
+    return res.json(rows);
+  } catch (err) {
+    return res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.get("/admin/verifications/user/:userId/latest", adminRateLimit, requireAdminAccess, async (req, res) => {
+  try {
+    const row = await getLatestVerificationSubmissionForUser(String(req.params.userId));
+    if (!row) {
+      return res.json(null);
+    }
+    return res.json(row);
+  } catch (err) {
+    return res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.get("/admin/users", adminRateLimit, requireAdminAccess, async (req, res) => {
+  const segment = String(req.query.segment ?? "all");
+  const validSegment = ["verified", "not_verified", "all"].includes(segment)
+    ? (segment as "verified" | "not_verified" | "all")
+    : "all";
+  const q = req.query.q ? String(req.query.q) : "";
+  const limit = Math.max(1, Math.min(Number(req.query.limit ?? 50), 200));
+  const offset = Math.max(0, Number(req.query.offset ?? 0));
+  try {
+    const rows = await listAdminUsers({ segment: validSegment, q, limit, offset });
     return res.json(rows);
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });

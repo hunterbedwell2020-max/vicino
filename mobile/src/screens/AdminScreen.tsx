@@ -1,93 +1,108 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import {
-  getUsers,
-  getVerificationQueue,
+  getAdminUsers,
+  getLatestVerificationByUser,
   postAdminBanUser,
   postAdminSetPlanTier,
   postAdminUnbanUser,
   postReviewVerification,
-  type ApiUser,
+  type AdminUserListItem,
   type VerificationSubmission
 } from "../api";
 import { theme } from "../theme";
 
+const PAGE_SIZE = 40;
+
 export function AdminScreen({ authToken }: { authToken: string }) {
-  const [queue, setQueue] = useState<VerificationSubmission[]>([]);
-  const [users, setUsers] = useState<ApiUser[]>([]);
+  const [rows, setRows] = useState<AdminUserListItem[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<VerificationSubmission | null>(null);
   const [segment, setSegment] = useState<"not_verified" | "verified">("not_verified");
   const [query, setQuery] = useState("");
+  const [queryDraft, setQueryDraft] = useState("");
+  const [countVerified, setCountVerified] = useState(0);
+  const [countNotVerified, setCountNotVerified] = useState(0);
 
-  const loadQueue = async () => {
-    setLoading(true);
+  const hasMore = rows.length < total;
+
+  const loadCounts = async (q: string) => {
+    const [verifiedRes, notVerifiedRes] = await Promise.all([
+      getAdminUsers({ segment: "verified", q, limit: 1, offset: 0 }, authToken),
+      getAdminUsers({ segment: "not_verified", q, limit: 1, offset: 0 }, authToken)
+    ]);
+    setCountVerified(verifiedRes.total);
+    setCountNotVerified(notVerifiedRes.total);
+  };
+
+  const loadPage = async (reset = false) => {
+    const targetOffset = reset ? 0 : rows.length;
+    if (reset) {
+      setLoading(true);
+    } else {
+      setLoadingMore(true);
+    }
     setError(null);
+
     try {
-      const rows = await getVerificationQueue("all", authToken);
-      setQueue(rows);
-      const allUsers = await getUsers();
-      setUsers(allUsers);
+      const result = await getAdminUsers(
+        {
+          segment,
+          q: query,
+          limit: PAGE_SIZE,
+          offset: targetOffset
+        },
+        authToken
+      );
+
+      setTotal(result.total);
+      setRows((prev) => (reset ? result.rows : [...prev, ...result.rows]));
+      if (reset) {
+        await loadCounts(query);
+      }
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   };
 
   useEffect(() => {
-    void loadQueue();
-  }, [authToken]);
+    const timer = setTimeout(() => {
+      setQuery(queryDraft.trim());
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [queryDraft]);
+
+  useEffect(() => {
+    void loadPage(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken, segment, query]);
+
+  const openSubmission = async (user: AdminUserListItem) => {
+    setError(null);
+    try {
+      const submission = await getLatestVerificationByUser(user.id, authToken);
+      if (!submission) {
+        setError("No verification photos submitted yet.");
+        return;
+      }
+      setSelected(submission);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
 
   const review = async (submissionId: string, decision: "approved" | "rejected") => {
     setError(null);
     try {
       await postReviewVerification(submissionId, decision, authToken);
       setSelected(null);
-      await loadQueue();
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
-
-  const setBanState = async (item: VerificationSubmission, nextBanned: boolean) => {
-    setError(null);
-    try {
-      if (nextBanned) {
-        await postAdminBanUser(item.userId, "Admin moderation", authToken);
-      } else {
-        await postAdminUnbanUser(item.userId, authToken);
-      }
-      await loadQueue();
-      setSelected((prev) =>
-        prev && prev.id === item.id
-          ? {
-              ...prev,
-              isBanned: nextBanned
-            }
-          : prev
-      );
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
-
-  const setPlanTier = async (item: VerificationSubmission, planTier: "free" | "plus") => {
-    setError(null);
-    try {
-      await postAdminSetPlanTier(item.userId, planTier, authToken, undefined, "manual_admin_grant");
-      await loadQueue();
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
-
-  const setPlanTierForUser = async (userId: string, planTier: "free" | "plus") => {
-    setError(null);
-    try {
-      await postAdminSetPlanTier(userId, planTier, authToken, undefined, "manual_admin_grant");
-      await loadQueue();
+      await loadPage(true);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -101,56 +116,31 @@ export function AdminScreen({ authToken }: { authToken: string }) {
       } else {
         await postAdminUnbanUser(userId, authToken);
       }
-      await loadQueue();
+      await loadPage(true);
+      setSelected((prev) =>
+        prev && prev.userId === userId
+          ? {
+              ...prev,
+              isBanned: nextBanned
+            }
+          : prev
+      );
     } catch (err) {
       setError((err as Error).message);
     }
   };
 
-  const usersById = Object.fromEntries(users.map((u) => [u.id, u])) as Record<string, ApiUser>;
-  const normalizedQuery = query.trim().toLowerCase();
-  const byUserLatestSubmission = new Map<string, VerificationSubmission>();
-  for (const item of queue) {
-    if (!byUserLatestSubmission.has(item.userId)) {
-      byUserLatestSubmission.set(item.userId, item);
+  const setPlanTierForUser = async (userId: string, planTier: "free" | "plus") => {
+    setError(null);
+    try {
+      await postAdminSetPlanTier(userId, planTier, authToken, undefined, "manual_admin_grant");
+      await loadPage(true);
+    } catch (err) {
+      setError((err as Error).message);
     }
-  }
+  };
 
-  const pendingRows = users
-    .filter((u) => !u.verified)
-    .map((u) => ({
-      user: u,
-      submission: byUserLatestSubmission.get(u.id) ?? null
-    }))
-    .filter((row) => {
-      if (!normalizedQuery) {
-        return true;
-      }
-      const fullName = `${row.user.firstName} ${row.user.lastName ?? ""}`.toLowerCase();
-      const email = (row.user.email ?? "").toLowerCase();
-      const username = (row.user.username ?? "").toLowerCase();
-      return (
-        fullName.includes(normalizedQuery) ||
-        email.includes(normalizedQuery) ||
-        username.includes(normalizedQuery)
-      );
-    });
-
-  const verifiedRows = users
-    .filter((u) => u.verified)
-    .filter((u) => {
-      if (!normalizedQuery) {
-        return true;
-      }
-      const fullName = `${u.firstName} ${u.lastName ?? ""}`.toLowerCase();
-      const email = (u.email ?? "").toLowerCase();
-      const username = (u.username ?? "").toLowerCase();
-      return (
-        fullName.includes(normalizedQuery) ||
-        email.includes(normalizedQuery) ||
-        username.includes(normalizedQuery)
-      );
-    });
+  const selectedUser = useMemo(() => rows.find((u) => u.id === selected?.userId) ?? null, [rows, selected]);
 
   return (
     <ScrollView contentContainerStyle={styles.wrap}>
@@ -167,7 +157,7 @@ export function AdminScreen({ authToken }: { authToken: string }) {
             onPress={() => setSegment("not_verified")}
           >
             <Text style={[styles.segmentText, segment === "not_verified" && styles.segmentTextActive]}>
-              Not Yet Verified ({pendingRows.length})
+              Not Yet Verified ({countNotVerified})
             </Text>
           </Pressable>
           <Pressable
@@ -179,93 +169,90 @@ export function AdminScreen({ authToken }: { authToken: string }) {
             onPress={() => setSegment("verified")}
           >
             <Text style={[styles.segmentText, segment === "verified" && styles.segmentTextActive]}>
-              Verified ({verifiedRows.length})
+              Verified ({countVerified})
             </Text>
           </Pressable>
         </View>
         <TextInput
           style={styles.searchInput}
-          value={query}
-          onChangeText={setQuery}
+          value={queryDraft}
+          onChangeText={setQueryDraft}
           placeholder="Search name, username, or email"
           placeholderTextColor={theme.colors.muted}
           autoCapitalize="none"
         />
         <Pressable
           style={({ pressed }) => [styles.refreshBtn, pressed && styles.refreshBtnPressed]}
-          onPress={() => void loadQueue()}
+          onPress={() => void loadPage(true)}
           disabled={loading}
         >
           <Text style={styles.refreshText}>{loading ? "Refreshing..." : "Refresh"}</Text>
         </Pressable>
       </View>
 
-      {segment === "not_verified"
-        ? pendingRows.map((row) => (
+      {rows.map((user) => (
+        <View key={user.id} style={styles.itemCard}>
+          <Pressable
+            style={({ pressed }) => [pressed && styles.itemCardPressed]}
+            onPress={() => {
+              if (!user.verified) {
+                void openSubmission(user);
+              }
+            }}
+          >
+            <Text style={styles.name}>
+              {user.firstName} {user.lastName ?? ""}
+            </Text>
+            <Text style={styles.meta}>
+              @{user.username ?? "no-username"} • {user.email ?? "no-email"}
+            </Text>
+            <Text style={styles.meta}>Age {user.age} • {user.gender}</Text>
+            {user.verified ? (
+              <Text style={styles.meta}>Membership: {String(user.planTier ?? "free").toUpperCase()}</Text>
+            ) : (
+              <Text style={styles.uri}>Tap card to review verification photos</Text>
+            )}
+          </Pressable>
+          <View style={styles.row}>
             <Pressable
-              key={row.user.id}
-              style={({ pressed }) => [styles.itemCard, pressed && styles.itemCardPressed]}
-              onPress={() => {
-                if (row.submission) {
-                  setSelected(row.submission);
-                }
-              }}
+              style={({ pressed }) => [styles.planBtn, pressed && styles.planBtnPressed]}
+              onPress={() => void setPlanTierForUser(user.id, "plus")}
             >
-              <Text style={styles.name}>
-                {row.user.firstName} {row.user.lastName ?? ""}
-              </Text>
-              <Text style={styles.meta}>
-                @{row.user.username ?? "no-username"} • {row.user.email ?? "no-email"}
-              </Text>
-              <Text style={styles.meta}>Age {row.user.age} • {row.user.gender}</Text>
-              <Text style={styles.uri}>
-                {row.submission
-                  ? "Tap to review verification photos"
-                  : "No verification photos submitted yet"}
-              </Text>
+              <Text style={styles.btnText}>Grant Plus</Text>
             </Pressable>
-          ))
-        : verifiedRows.map((user) => (
-            <View key={user.id} style={styles.itemCard}>
-              <Text style={styles.name}>
-                {user.firstName} {user.lastName ?? ""}
-              </Text>
-              <Text style={styles.meta}>
-                @{user.username ?? "no-username"} • {user.email ?? "no-email"}
-              </Text>
-              <Text style={styles.meta}>
-                Membership: {String(user.planTier ?? "free").toUpperCase()}
-              </Text>
-              <View style={styles.row}>
-                <Pressable
-                  style={({ pressed }) => [styles.planBtn, pressed && styles.planBtnPressed]}
-                  onPress={() => void setPlanTierForUser(user.id, "plus")}
-                >
-                  <Text style={styles.btnText}>Grant Plus</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [styles.planResetBtn, pressed && styles.planResetBtnPressed]}
-                  onPress={() => void setPlanTierForUser(user.id, "free")}
-                >
-                  <Text style={styles.btnText}>Set Free</Text>
-                </Pressable>
-              </View>
-              <View style={styles.row}>
-                <Pressable
-                  style={({ pressed }) => [styles.banBtn, pressed && styles.banBtnPressed]}
-                  onPress={() => void setBanStateForUser(user.id, true)}
-                >
-                  <Text style={styles.btnText}>Ban</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [styles.unbanBtn, pressed && styles.unbanBtnPressed]}
-                  onPress={() => void setBanStateForUser(user.id, false)}
-                >
-                  <Text style={styles.btnText}>Unban</Text>
-                </Pressable>
-              </View>
-            </View>
-          ))}
+            <Pressable
+              style={({ pressed }) => [styles.planResetBtn, pressed && styles.planResetBtnPressed]}
+              onPress={() => void setPlanTierForUser(user.id, "free")}
+            >
+              <Text style={styles.btnText}>Set Free</Text>
+            </Pressable>
+          </View>
+          <View style={styles.row}>
+            <Pressable
+              style={({ pressed }) => [styles.banBtn, pressed && styles.banBtnPressed]}
+              onPress={() => void setBanStateForUser(user.id, true)}
+            >
+              <Text style={styles.btnText}>Ban</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.unbanBtn, pressed && styles.unbanBtnPressed]}
+              onPress={() => void setBanStateForUser(user.id, false)}
+            >
+              <Text style={styles.btnText}>Unban</Text>
+            </Pressable>
+          </View>
+        </View>
+      ))}
+
+      {hasMore ? (
+        <Pressable
+          style={({ pressed }) => [styles.loadMoreBtn, pressed && styles.loadMoreBtnPressed]}
+          onPress={() => void loadPage(false)}
+          disabled={loadingMore}
+        >
+          <Text style={styles.loadMoreText}>{loadingMore ? "Loading..." : `Load more (${rows.length}/${total})`}</Text>
+        </Pressable>
+      ) : null}
 
       {selected ? (
         <View style={styles.detailCard}>
@@ -274,11 +261,9 @@ export function AdminScreen({ authToken }: { authToken: string }) {
             {selected.firstName} {selected.lastName ?? ""}
           </Text>
           <Text style={styles.meta}>
-            {usersById[selected.userId]?.email ?? "no-email"} • @{usersById[selected.userId]?.username ?? "no-username"}
+            {selectedUser?.email ?? "no-email"} • @{selectedUser?.username ?? "no-username"}
           </Text>
-          <Text style={styles.meta}>
-            Age {selected.age} • {selected.gender}
-          </Text>
+          <Text style={styles.meta}>Age {selected.age} • {selected.gender}</Text>
           <Text style={[styles.meta, selected.isBanned ? styles.bannedMeta : null]}>
             Status: {selected.isBanned ? "Banned" : "Active"}
           </Text>
@@ -306,14 +291,14 @@ export function AdminScreen({ authToken }: { authToken: string }) {
             {selected.isBanned ? (
               <Pressable
                 style={({ pressed }) => [styles.unbanBtn, pressed && styles.unbanBtnPressed]}
-                onPress={() => void setBanState(selected, false)}
+                onPress={() => void setBanStateForUser(selected.userId, false)}
               >
                 <Text style={styles.btnText}>Unban User</Text>
               </Pressable>
             ) : (
               <Pressable
                 style={({ pressed }) => [styles.banBtn, pressed && styles.banBtnPressed]}
-                onPress={() => void setBanState(selected, true)}
+                onPress={() => void setBanStateForUser(selected.userId, true)}
               >
                 <Text style={styles.btnText}>Ban User</Text>
               </Pressable>
@@ -322,13 +307,13 @@ export function AdminScreen({ authToken }: { authToken: string }) {
           <View style={styles.row}>
             <Pressable
               style={({ pressed }) => [styles.planBtn, pressed && styles.planBtnPressed]}
-              onPress={() => void setPlanTier(selected, "plus")}
+              onPress={() => void setPlanTierForUser(selected.userId, "plus")}
             >
               <Text style={styles.btnText}>Grant Plus</Text>
             </Pressable>
             <Pressable
               style={({ pressed }) => [styles.planResetBtn, pressed && styles.planResetBtnPressed]}
-              onPress={() => void setPlanTier(selected, "free")}
+              onPress={() => void setPlanTierForUser(selected.userId, "free")}
             >
               <Text style={styles.btnText}>Set Free</Text>
             </Pressable>
@@ -342,12 +327,7 @@ export function AdminScreen({ authToken }: { authToken: string }) {
         </View>
       ) : null}
 
-      {!loading && segment === "not_verified" && pendingRows.length === 0 ? (
-        <Text style={styles.empty}>No unverified users found.</Text>
-      ) : null}
-      {!loading && segment === "verified" && verifiedRows.length === 0 ? (
-        <Text style={styles.empty}>No verified users found.</Text>
-      ) : null}
+      {!loading && rows.length === 0 ? <Text style={styles.empty}>No users found.</Text> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </ScrollView>
   );
@@ -430,7 +410,7 @@ const styles = StyleSheet.create({
     gap: 6
   },
   itemCardPressed: {
-    backgroundColor: "#F4EFFB"
+    opacity: 0.9
   },
   detailCard: {
     backgroundColor: theme.colors.card,
@@ -545,6 +525,19 @@ const styles = StyleSheet.create({
     backgroundColor: "#E3D7F5"
   },
   closeText: {
+    color: theme.colors.primary,
+    fontWeight: "700"
+  },
+  loadMoreBtn: {
+    backgroundColor: "#EFE8F8",
+    borderRadius: theme.radius.sm,
+    paddingVertical: 11,
+    alignItems: "center"
+  },
+  loadMoreBtnPressed: {
+    backgroundColor: "#E3D7F5"
+  },
+  loadMoreText: {
     color: theme.colors.primary,
     fontWeight: "700"
   },

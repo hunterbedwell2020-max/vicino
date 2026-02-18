@@ -150,6 +150,30 @@ export interface VerificationSubmission {
   reviewedAt: string | null;
 }
 
+export interface AdminUserListItem {
+  id: string;
+  firstName: string;
+  lastName?: string | null;
+  username?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  age: number;
+  gender: string;
+  verified: boolean;
+  verificationStatus?: "unsubmitted" | "pending" | "approved" | "rejected";
+  verificationSubmittedAt?: string | null;
+  verificationReviewedAt?: string | null;
+  planTier?: "free" | "plus";
+  isBanned?: boolean;
+}
+
+export interface AdminUsersResponse {
+  rows: AdminUserListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface ApiPlanLimits {
   maxDailySwipes: number | null;
   maxMessagesPerUser: number;
@@ -434,6 +458,46 @@ export function getVerificationQueue(
     }
     }
   );
+}
+
+export function getLatestVerificationByUser(
+  userId: string,
+  authToken?: string,
+  adminKey?: string
+) {
+  return request<VerificationSubmission | null>(`/admin/verifications/user/${userId}/latest`, {
+    headers: {
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      ...(adminKey ? { "x-admin-key": adminKey } : {})
+    }
+  });
+}
+
+export function getAdminUsers(
+  params: {
+    segment?: "verified" | "not_verified" | "all";
+    q?: string;
+    limit?: number;
+    offset?: number;
+  },
+  authToken?: string,
+  adminKey?: string
+) {
+  const query = new URLSearchParams();
+  if (params.segment) {
+    query.set("segment", params.segment);
+  }
+  if (params.q) {
+    query.set("q", params.q);
+  }
+  query.set("limit", String(params.limit ?? 50));
+  query.set("offset", String(params.offset ?? 0));
+  return request<AdminUsersResponse>(`/admin/users?${query.toString()}`, {
+    headers: {
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      ...(adminKey ? { "x-admin-key": adminKey } : {})
+    }
+  });
 }
 
 export function postReviewVerification(

@@ -287,6 +287,107 @@ export async function listUsers() {
   return rows.map(mapUser);
 }
 
+export async function listAdminUsers(options?: {
+  segment?: "verified" | "not_verified" | "all";
+  q?: string;
+  limit?: number;
+  offset?: number;
+}) {
+  const segment = options?.segment ?? "all";
+  const limit = Math.max(1, Math.min(Number(options?.limit ?? 50), 200));
+  const offset = Math.max(0, Number(options?.offset ?? 0));
+  const q = options?.q?.trim().toLowerCase() ?? "";
+
+  const whereParts: string[] = [];
+  const params: unknown[] = [];
+
+  if (segment === "verified") {
+    whereParts.push("u.verified = TRUE");
+  } else if (segment === "not_verified") {
+    whereParts.push("u.verified = FALSE");
+  }
+
+  if (q) {
+    params.push(`%${q}%`);
+    const idx = `$${params.length}`;
+    whereParts.push(
+      `(LOWER(u.first_name) LIKE ${idx} OR LOWER(u.last_name) LIKE ${idx} OR LOWER(COALESCE(u.email, '')) LIKE ${idx} OR LOWER(COALESCE(u.username, '')) LIKE ${idx})`
+    );
+  }
+
+  const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : "";
+  const countParams = [...params];
+  params.push(limit, offset);
+  const limitParam = `$${params.length - 1}`;
+  const offsetParam = `$${params.length}`;
+
+  const countSql = `SELECT COUNT(*)::int AS total FROM users u ${whereClause}`;
+  const rowsSql = `
+    SELECT
+      u.id,
+      u.first_name AS "firstName",
+      u.last_name AS "lastName",
+      u.username,
+      u.email,
+      u.phone,
+      u.age,
+      u.gender,
+      u.verified,
+      u.verification_status AS "verificationStatus",
+      u.verification_submitted_at AS "verificationSubmittedAt",
+      u.verification_reviewed_at AS "verificationReviewedAt",
+      u.plan_tier AS "planTier",
+      u.is_banned AS "isBanned"
+    FROM users u
+    ${whereClause}
+    ORDER BY
+      CASE WHEN u.verified THEN 1 ELSE 0 END ASC,
+      COALESCE(u.verification_submitted_at, u.verification_reviewed_at) DESC NULLS LAST,
+      u.id DESC
+    LIMIT ${limitParam}
+    OFFSET ${offsetParam}`;
+
+  const [countRes, rowsRes] = await Promise.all([
+    pool.query(countSql, countParams),
+    pool.query(rowsSql, params)
+  ]);
+
+  return {
+    rows: rowsRes.rows,
+    total: Number(countRes.rows[0]?.total ?? 0),
+    limit,
+    offset
+  };
+}
+
+export async function getLatestVerificationSubmissionForUser(userId: string) {
+  const { rows } = await pool.query(
+    `SELECT
+      vs.id,
+      vs.user_id AS "userId",
+      u.first_name AS "firstName",
+      u.last_name AS "lastName",
+      u.age,
+      u.gender,
+      vs.id_document_uri AS "idDocumentUri",
+      vs.selfie_uri AS "selfieUri",
+      vs.id_document_type AS "idDocumentType",
+      vs.status,
+      u.is_banned AS "isBanned",
+      vs.submitted_at AS "submittedAt",
+      vs.reviewer_id AS "reviewerId",
+      vs.reviewer_note AS "reviewerNote",
+      vs.reviewed_at AS "reviewedAt"
+     FROM verification_submissions vs
+     JOIN users u ON u.id = vs.user_id
+     WHERE vs.user_id = $1
+     ORDER BY vs.submitted_at DESC
+     LIMIT 1`,
+    [userId]
+  );
+  return (rows[0] ?? null) as Record<string, unknown> | null;
+}
+
 export async function registerPushTokenForUser(
   userId: string,
   expoPushToken: string,
