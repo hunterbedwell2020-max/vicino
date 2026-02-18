@@ -10,7 +10,9 @@ import {
   assertAdminSession,
   banUserByAdmin,
   closeAvailability,
+  createUserReport,
   createMeetupOffer,
+  purgeExpiredVerificationSubmissions,
   expireLocationIfNeeded,
   getAvailabilityState,
   getVerificationStatus,
@@ -31,10 +33,12 @@ import {
   respondAvailabilityInterest,
   respondToOffer,
   sendMessage,
+  setUserPlanTierByAdmin,
   setMeetDecision,
   startAvailability,
   submitVerification,
   unbanUserByAdmin,
+  trackProductEvent,
   updateUserProfile,
   updateUserDistancePreference,
   updateUserLocation,
@@ -360,6 +364,85 @@ app.post("/admin/users/:userId/unban", adminRateLimit, requireAdminAccess, async
     const adminUserId = await resolveAdminActorId(req);
     const result = await unbanUserByAdmin(adminUserId, String(req.params.userId));
     return res.json(result);
+  } catch (err) {
+    return res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/admin/users/:userId/plan-tier", adminRateLimit, requireAdminAccess, async (req, res) => {
+  const schema = z.object({
+    planTier: z.enum(["free", "plus"]),
+    note: z.string().max(280).optional()
+  });
+  const parsed = schema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+
+  try {
+    const adminUserId = await resolveAdminActorId(req);
+    const result = await setUserPlanTierByAdmin(
+      adminUserId,
+      String(req.params.userId),
+      parsed.data.planTier,
+      parsed.data.note
+    );
+    return res.json(result);
+  } catch (err) {
+    return res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/analytics/events", userActionRateLimit, async (req, res) => {
+  const schema = z.object({
+    eventName: z
+      .string()
+      .min(3)
+      .max(64)
+      .regex(/^[a-z0-9_]+$/),
+    userId: z.string().optional(),
+    metadata: z.record(z.any()).optional()
+  });
+  const parsed = schema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+  try {
+    const row = await trackProductEvent(parsed.data.eventName, parsed.data.userId, parsed.data.metadata);
+    return res.json(row);
+  } catch (err) {
+    return res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/reports", userActionRateLimit, async (req, res) => {
+  const schema = z.object({
+    reporterUserId: z.string(),
+    targetUserId: z.string(),
+    reason: z.string().min(3).max(120),
+    details: z.string().max(1000).optional()
+  });
+  const parsed = schema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+  try {
+    const row = await createUserReport(
+      parsed.data.reporterUserId,
+      parsed.data.targetUserId,
+      parsed.data.reason,
+      parsed.data.details
+    );
+    return res.json(row);
+  } catch (err) {
+    return res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/admin/maintenance/purge-verification", adminRateLimit, requireAdminAccess, async (_req, res) => {
+  try {
+    const row = await purgeExpiredVerificationSubmissions();
+    return res.json(row);
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
   }
@@ -694,6 +777,17 @@ const PORT = Number(process.env.PORT ?? 4000);
 
 async function start() {
   await initDb();
+  const retentionResult = await purgeExpiredVerificationSubmissions().catch(() => null);
+  if (retentionResult) {
+    console.log(
+      JSON.stringify({
+        level: "info",
+        event: "verification_retention_cleanup",
+        deletedCount: retentionResult.deletedCount,
+        retentionDays: retentionResult.retentionDays
+      })
+    );
+  }
   app.listen(PORT, () => {
     console.log(`Vicino backend listening on :${PORT}`);
   });

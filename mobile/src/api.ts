@@ -65,6 +65,7 @@ export interface ApiUser {
   promptThree?: string | null;
   distanceMiles?: number;
   maxDistanceMiles?: number;
+  planTier?: "free" | "plus";
 }
 
 export interface ApiMatch {
@@ -149,16 +150,24 @@ export interface VerificationSubmission {
   reviewedAt: string | null;
 }
 
+export interface ApiPlanLimits {
+  maxDailySwipes: number | null;
+  maxMessagesPerUser: number;
+  maxMessagesTotal: number;
+}
+
 export interface AuthResponse {
   token: string;
   refreshToken?: string;
   user: ApiUser;
+  limits?: ApiPlanLimits;
 }
 
 export interface AuthSessionResponse {
   token: string;
   user: ApiUser;
   verification: VerificationStatus;
+  limits?: ApiPlanLimits;
 }
 
 export interface RefreshAuthResponse extends AuthSessionResponse {
@@ -471,5 +480,48 @@ export function postAdminUnbanUser(userId: string, authToken?: string, adminKey?
       ...(adminKey ? { "X-Admin-Key": adminKey } : {})
     },
     body: JSON.stringify({})
+  });
+}
+
+export function postAdminSetPlanTier(
+  userId: string,
+  planTier: "free" | "plus",
+  authToken?: string,
+  adminKey?: string,
+  note?: string
+) {
+  return request<{ ok: boolean; userId: string; planTier: "free" | "plus" }>(
+    `/admin/users/${userId}/plan-tier`,
+    {
+      method: "POST",
+      headers: {
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        ...(adminKey ? { "X-Admin-Key": adminKey } : {})
+      },
+      body: JSON.stringify({ planTier, note })
+    }
+  );
+}
+
+export function postAnalyticsEvent(
+  eventName: string,
+  userId?: string,
+  metadata?: Record<string, unknown>
+) {
+  return request<{ ok: boolean }>("/analytics/events", {
+    method: "POST",
+    body: JSON.stringify({ eventName, userId, metadata })
+  });
+}
+
+export function postReportUser(
+  reporterUserId: string,
+  targetUserId: string,
+  reason: string,
+  details?: string
+) {
+  return request<{ ok: boolean }>("/reports", {
+    method: "POST",
+    body: JSON.stringify({ reporterUserId, targetUserId, reason, details })
   });
 }

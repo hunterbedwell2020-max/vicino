@@ -23,15 +23,23 @@ const AUTO_COMPLETE_THRESHOLD = SCREEN_WIDTH * 0.66;
 const SWIPE_OUT_X = SCREEN_WIDTH * 0.72;
 const TAP_DISTANCE = 8;
 const MODAL_DRAG_ZONE_HEIGHT = SCREEN_HEIGHT * 0.34;
+const FONT_REGULAR = "Satoshi-Regular";
+const FONT_MEDIUM = "Satoshi-Medium";
 
 export function SwipeScreen({
   card,
   remaining,
-  onSwipe
+  onSwipe,
+  swipeError,
+  onDismissSwipeError,
+  onReport
 }: {
   card: ProfileCard | null;
   remaining: number;
   onSwipe: (decision: "left" | "right") => void;
+  swipeError?: string | null;
+  onDismissSwipeError?: () => void;
+  onReport?: (userId: string) => void;
 }) {
   const pan = useRef(new Animated.ValueXY()).current;
   const swipingOutRef = useRef(false);
@@ -279,6 +287,11 @@ export function SwipeScreen({
 
   return (
     <View style={styles.wrap}>
+      {swipeError ? (
+        <Pressable style={styles.swipeErrorBox} onPress={onDismissSwipeError}>
+          <Text style={styles.swipeErrorText}>{swipeError}</Text>
+        </Pressable>
+      ) : null}
       <Animated.View
         style={[
           styles.card,
@@ -370,6 +383,17 @@ export function SwipeScreen({
                 </View>
               ))}
             </View>
+
+            <Pressable
+              style={styles.reportBtn}
+              onPress={() => {
+                if (card?.id) {
+                  onReport?.(card.id);
+                }
+              }}
+            >
+              <Text style={styles.reportBtnText}>Report Profile</Text>
+            </Pressable>
           </ScrollView>
         </Animated.View>
       </Modal>
@@ -379,6 +403,18 @@ export function SwipeScreen({
 
 const styles = StyleSheet.create({
   wrap: { gap: 10, flex: 1 },
+  swipeErrorBox: {
+    backgroundColor: "#FEE4E2",
+    borderRadius: theme.radius.sm,
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    paddingHorizontal: 12,
+    paddingVertical: 9
+  },
+  swipeErrorText: {
+    color: "#9A3412",
+    fontFamily: FONT_MEDIUM
+  },
   card: {
     flex: 1,
     minHeight: SCREEN_HEIGHT * 0.7,
@@ -443,7 +479,8 @@ const styles = StyleSheet.create({
   },
   badgeText: {
     fontWeight: "800",
-    letterSpacing: 1
+    letterSpacing: 1,
+    fontFamily: FONT_REGULAR
   },
   passBadgeText: {
     color: theme.colors.danger
@@ -458,21 +495,25 @@ const styles = StyleSheet.create({
   name: {
     fontSize: 24,
     fontWeight: "700",
-    color: theme.colors.text
+    color: theme.colors.text,
+    fontFamily: FONT_REGULAR
   },
   bio: {
     fontSize: 14,
-    color: theme.colors.muted
+    color: theme.colors.muted,
+    fontFamily: FONT_MEDIUM
   },
   remaining: {
     marginTop: 8,
     color: theme.colors.primary,
-    fontWeight: "600"
+    fontWeight: "600",
+    fontFamily: FONT_MEDIUM
   },
   tapHint: {
     color: theme.colors.primaryLight,
     fontSize: 12,
-    fontWeight: "600"
+    fontWeight: "600",
+    fontFamily: FONT_MEDIUM
   },
   emptyWrap: {
     backgroundColor: theme.colors.card,
@@ -483,10 +524,12 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 20,
     color: theme.colors.text,
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR
   },
   emptySub: {
-    color: theme.colors.muted
+    color: theme.colors.muted,
+    fontFamily: FONT_MEDIUM
   },
 
   modalRoot: {
@@ -513,11 +556,13 @@ const styles = StyleSheet.create({
   modalTitle: {
     color: "#fff",
     fontSize: 20,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: FONT_REGULAR
   },
   closeText: {
     color: "#fff",
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR
   },
   modalBody: {
     padding: 14,
@@ -549,11 +594,13 @@ const styles = StyleSheet.create({
   sectionTitle: {
     color: theme.colors.text,
     fontWeight: "800",
-    fontSize: 18
+    fontSize: 18,
+    fontFamily: FONT_REGULAR
   },
   sectionText: {
     color: theme.colors.muted,
-    lineHeight: 20
+    lineHeight: 20,
+    fontFamily: FONT_MEDIUM
   },
   hobbyWrap: {
     flexDirection: "row",
@@ -568,7 +615,8 @@ const styles = StyleSheet.create({
   },
   hobbyText: {
     color: theme.colors.primary,
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: FONT_MEDIUM
   },
   qaCard: {
     backgroundColor: "#F7F3FB",
@@ -578,9 +626,24 @@ const styles = StyleSheet.create({
   },
   qaQuestion: {
     color: theme.colors.primary,
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR
   },
   qaAnswer: {
-    color: theme.colors.text
+    color: theme.colors.text,
+    fontFamily: FONT_MEDIUM
+  },
+  reportBtn: {
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    backgroundColor: "#FEF2F2",
+    borderRadius: theme.radius.sm,
+    alignItems: "center",
+    paddingVertical: 12
+  },
+  reportBtnText: {
+    color: "#B42318",
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR
   }
 });

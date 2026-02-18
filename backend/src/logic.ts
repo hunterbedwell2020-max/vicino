@@ -14,6 +14,16 @@ import type { MeetDecision, SwipeDecision } from "./types.js";
 const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 const now = () => new Date();
 const REFRESH_SESSION_DAYS = Math.max(7, Number(process.env.JWT_REFRESH_DAYS ?? 30));
+const FREE_DAILY_SWIPE_LIMIT = Math.max(10, Number(process.env.FREE_DAILY_SWIPE_LIMIT ?? 100));
+const CURRENT_POLICY_VERSION = process.env.POLICY_VERSION_CURRENT?.trim() || "v1.0";
+const VERIFICATION_RETENTION_DAYS = Math.max(7, Number(process.env.VERIFICATION_RETENTION_DAYS ?? 30));
+
+type PlanTier = "free" | "plus";
+type PlanLimits = {
+  maxDailySwipes: number | null;
+  maxMessagesPerUser: number;
+  maxMessagesTotal: number;
+};
 
 type DbMatch = {
   id: string;
@@ -51,6 +61,7 @@ function verifyPassword(password: string, stored: string) {
 }
 
 function mapUser(row: Record<string, unknown>) {
+  const planTier = getPlanTier(row);
   return {
     id: String(row.id),
     firstName: String(row.first_name),
@@ -73,7 +84,29 @@ function mapUser(row: Record<string, unknown>) {
     promptOne: row.prompt_one ? String(row.prompt_one) : null,
     promptTwo: row.prompt_two ? String(row.prompt_two) : null,
     promptThree: row.prompt_three ? String(row.prompt_three) : null,
-    maxDistanceMiles: Number(row.max_distance_miles ?? 25)
+    maxDistanceMiles: Number(row.max_distance_miles ?? 25),
+    planTier
+  };
+}
+
+function getPlanTier(row: Record<string, unknown>): PlanTier {
+  const raw = String(row.plan_tier ?? "free").toLowerCase();
+  return raw === "plus" ? "plus" : "free";
+}
+
+function getPlanLimits(planTier: PlanTier): PlanLimits {
+  if (planTier === "plus") {
+    return {
+      maxDailySwipes: null,
+      maxMessagesPerUser: MAX_MESSAGES_PER_USER,
+      maxMessagesTotal: MAX_MESSAGES_TOTAL
+    };
+  }
+
+  return {
+    maxDailySwipes: FREE_DAILY_SWIPE_LIMIT,
+    maxMessagesPerUser: MAX_MESSAGES_PER_USER,
+    maxMessagesTotal: MAX_MESSAGES_TOTAL
   };
 }
 
@@ -145,7 +178,7 @@ async function fetchSessionUser(userId: string) {
   const { rows } = await pool.query(
     `SELECT id, first_name, last_name, username, is_admin, email, phone, is_banned, age, gender, preferred_gender, likes, dislikes,
             bio, profile_photo_url, verified, photos, hobbies, prompt_one, prompt_two, prompt_three, max_distance_miles,
-            verification_status, verification_submitted_at, verification_reviewed_at, verification_reviewer_note
+            verification_status, verification_submitted_at, verification_reviewed_at, verification_reviewer_note, plan_tier
      FROM users
      WHERE id = $1`,
     [userId]
@@ -173,7 +206,7 @@ async function getUserAny(userId: string) {
   const { rows } = await pool.query(
     `SELECT id, first_name, last_name, username, password_hash, is_admin, email, phone, is_banned, age, gender, preferred_gender, likes, dislikes, bio, profile_photo_url, verified, photos,
             hobbies, prompt_one, prompt_two, prompt_three,
-            latitude, longitude, max_distance_miles,
+            latitude, longitude, max_distance_miles, plan_tier,
             verification_status, verification_submitted_at,
             verification_reviewed_at, verification_reviewer_note
      FROM users WHERE id = $1`,
@@ -246,7 +279,7 @@ export async function listUsers() {
   const { rows } = await pool.query(
     `SELECT id, first_name, last_name, username, is_admin, email, phone, is_banned, age, gender,
             preferred_gender, likes, dislikes, bio, profile_photo_url, verified, photos,
-            hobbies, prompt_one, prompt_two, prompt_three,
+            hobbies, prompt_one, prompt_two, prompt_three, plan_tier,
             latitude, longitude, max_distance_miles
      FROM users
      ORDER BY id`
@@ -284,6 +317,9 @@ export async function registerAuthUser(input: {
   if (!input.acceptedTerms || !input.acceptedPrivacy) {
     throw new Error("You must accept the Terms and Privacy Policy to create an account.");
   }
+  if (input.policyVersion.trim() !== CURRENT_POLICY_VERSION) {
+    throw new Error("Please review and accept the latest Terms and Privacy Policy.");
+  }
 
   const passwordHash = hashPassword(input.password);
   const userId = id("u");
@@ -291,12 +327,12 @@ export async function registerAuthUser(input: {
     const { rows } = await pool.query(
       `INSERT INTO users (
         id, first_name, last_name, username, password_hash, email, age, gender,
-        terms_accepted_at, privacy_accepted_at, policy_version, marketing_consent,
+        terms_accepted_at, privacy_accepted_at, policy_version, marketing_consent, plan_tier,
         bio, verified, verification_status, photos, hobbies, max_distance_miles
       )
-      VALUES ($1, $2, $3, $4, $5, $6, 18, 'other', NOW(), NOW(), $7, $8, '', FALSE, 'unsubmitted', '[]'::jsonb, ARRAY[]::text[], 25)
+      VALUES ($1, $2, $3, $4, $5, $6, 18, 'other', NOW(), NOW(), $7, $8, 'free', '', FALSE, 'unsubmitted', '[]'::jsonb, ARRAY[]::text[], 25)
       RETURNING id, first_name, last_name, username, is_admin, email, phone, age, gender, preferred_gender, likes, dislikes,
-                bio, verified, photos, hobbies, prompt_one, prompt_two, prompt_three, max_distance_miles, is_banned`,
+                bio, verified, photos, hobbies, prompt_one, prompt_two, prompt_three, max_distance_miles, is_banned, plan_tier`,
       [
         userId,
         username,
@@ -310,7 +346,7 @@ export async function registerAuthUser(input: {
     );
 
     const tokens = await createAuthTokensForUser(rows[0] as Record<string, unknown>);
-    return { user: mapUser(rows[0]), ...tokens };
+    return { user: mapUser(rows[0]), limits: getPlanLimits("free"), ...tokens };
   } catch (err) {
     const pgErr = err as { code?: string; detail?: string };
     if (pgErr.code === "23505") {
@@ -324,7 +360,7 @@ export async function loginAuthUser(username: string, password: string) {
   const normalized = username.trim().toLowerCase();
   const { rows } = await pool.query(
     `SELECT id, first_name, last_name, username, password_hash, is_admin, email, phone, is_banned, age, gender, preferred_gender, likes, dislikes,
-            bio, profile_photo_url, verified, photos, hobbies, prompt_one, prompt_two, prompt_three, max_distance_miles
+            bio, profile_photo_url, verified, photos, hobbies, prompt_one, prompt_two, prompt_three, max_distance_miles, plan_tier
      FROM users
      WHERE username = $1`,
     [normalized]
@@ -340,7 +376,8 @@ export async function loginAuthUser(username: string, password: string) {
   }
 
   const tokens = await createAuthTokensForUser(user as Record<string, unknown>);
-  return { user: mapUser(user), ...tokens };
+  const planTier = getPlanTier(user as Record<string, unknown>);
+  return { user: mapUser(user), limits: getPlanLimits(planTier), ...tokens };
 }
 
 export async function getAuthSession(token: string) {
@@ -357,10 +394,12 @@ export async function getAuthSession(token: string) {
     throw new Error("Session expired. Please sign in again.");
   }
   const row = await fetchSessionUser(payload.sub);
+  const planTier = getPlanTier(row);
   return {
     token,
     user: mapUser(row),
-    verification: mapVerification(row)
+    verification: mapVerification(row),
+    limits: getPlanLimits(planTier)
   };
 }
 
@@ -415,11 +454,13 @@ export async function refreshAuthSession(refreshToken: string) {
     isAdmin: Boolean(user.is_admin)
   });
 
+  const planTier = getPlanTier(user);
   return {
     token: nextAccessToken,
     refreshToken: nextRefresh,
     user: mapUser(user),
-    verification: mapVerification(user)
+    verification: mapVerification(user),
+    limits: getPlanLimits(planTier)
   };
 }
 
@@ -875,6 +916,105 @@ export async function unbanUserByAdmin(adminUserId: string, targetUserId: string
   }
 }
 
+export async function setUserPlanTierByAdmin(
+  adminUserId: string,
+  targetUserId: string,
+  planTier: "free" | "plus",
+  note?: string
+) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const target = await client.query(
+      `SELECT id
+       FROM users
+       WHERE id = $1
+       FOR UPDATE`,
+      [targetUserId]
+    );
+    if (target.rowCount === 0) {
+      throw new Error("Target user not found.");
+    }
+
+    await client.query(
+      `UPDATE users
+       SET plan_tier = $2
+       WHERE id = $1`,
+      [targetUserId, planTier]
+    );
+
+    await logAdminAction(client as unknown as Queryable, {
+      adminUserId,
+      action: "plan_tier_update",
+      targetUserId,
+      metadata: {
+        planTier,
+        note: note?.trim() || null
+      }
+    });
+
+    await client.query("COMMIT");
+    return { ok: true as const, userId: targetUserId, planTier };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function trackProductEvent(
+  eventName: string,
+  userId?: string | null,
+  metadata?: Record<string, unknown>
+) {
+  const cleanedName = eventName.trim().toLowerCase();
+  if (!/^[a-z0-9_]{3,64}$/.test(cleanedName)) {
+    throw new Error("Invalid event name format.");
+  }
+  const payload = metadata ?? {};
+  await pool.query(
+    `INSERT INTO product_events (id, user_id, event_name, metadata, created_at)
+     VALUES ($1, $2, $3, $4::jsonb, NOW())`,
+    [id("evt"), userId ?? null, cleanedName, JSON.stringify(payload)]
+  );
+  return { ok: true as const };
+}
+
+export async function createUserReport(
+  reporterUserId: string,
+  targetUserId: string,
+  reason: string,
+  details?: string
+) {
+  if (reporterUserId === targetUserId) {
+    throw new Error("Cannot report your own account.");
+  }
+  await getUserAny(reporterUserId);
+  await getUserAny(targetUserId);
+  await pool.query(
+    `INSERT INTO user_reports (id, reporter_user_id, target_user_id, reason, details, status, created_at)
+     VALUES ($1, $2, $3, $4, $5, 'open', NOW())`,
+    [id("rpt"), reporterUserId, targetUserId, reason.trim(), details?.trim() || null]
+  );
+  return { ok: true as const };
+}
+
+export async function purgeExpiredVerificationSubmissions() {
+  const { rowCount } = await pool.query(
+    `DELETE FROM verification_submissions
+     WHERE status IN ('approved', 'rejected')
+       AND reviewed_at IS NOT NULL
+       AND reviewed_at < NOW() - ($1::int || ' days')::interval`,
+    [VERIFICATION_RETENTION_DAYS]
+  );
+  return {
+    ok: true as const,
+    retentionDays: VERIFICATION_RETENTION_DAYS,
+    deletedCount: Number(rowCount ?? 0)
+  };
+}
+
 export async function listMatches(userId?: string, options?: { limit?: number; offset?: number }) {
   const limit = Math.max(1, Math.min(Number(options?.limit ?? 50), 200));
   const offset = Math.max(0, Number(options?.offset ?? 0));
@@ -959,7 +1099,7 @@ export async function listMessages(matchId: string, options?: { limit?: number; 
 }
 
 export async function swipe(fromUserId: string, toUserId: string, decision: SwipeDecision) {
-  await getUser(fromUserId);
+  const fromUser = await getUser(fromUserId);
   await getUser(toUserId);
 
   if (fromUserId === toUserId) {
@@ -971,6 +1111,22 @@ export async function swipe(fromUserId: string, toUserId: string, decision: Swip
     await client.query("BEGIN");
     const pairKey = [fromUserId, toUserId].sort().join(":");
     await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [pairKey]);
+    const planLimits = getPlanLimits(getPlanTier(fromUser as Record<string, unknown>));
+    if (planLimits.maxDailySwipes !== null) {
+      const swipeWindowRes = await client.query(
+        `SELECT COUNT(*)::int AS count
+         FROM swipes
+         WHERE from_user_id = $1
+           AND created_at >= NOW() - INTERVAL '24 hours'`,
+        [fromUserId]
+      );
+      const used = Number(swipeWindowRes.rows[0]?.count ?? 0);
+      if (used >= planLimits.maxDailySwipes) {
+        throw new Error(
+          `Daily swipe limit reached (${planLimits.maxDailySwipes}). Upgrade to Vicino Plus for unlimited swipes.`
+        );
+      }
+    }
 
     await client.query(
       `INSERT INTO swipes (from_user_id, to_user_id, decision, created_at)

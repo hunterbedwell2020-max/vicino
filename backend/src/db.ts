@@ -13,9 +13,15 @@ const connectionString =
 
 export const pool = new Pool({ connectionString });
 
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? "hunterbedwell";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "Teton7650!";
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "hunterbedwell@vicino.app";
+const ADMIN_SEED = (() => {
+  const username = process.env.ADMIN_USERNAME?.trim();
+  const password = process.env.ADMIN_PASSWORD?.trim();
+  const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  if (!username || !password || !email) {
+    throw new Error("ADMIN_USERNAME, ADMIN_PASSWORD, and ADMIN_EMAIL must be set.");
+  }
+  return { username, password, email };
+})();
 
 function hashPassword(password: string) {
   const salt = randomBytes(16).toString("hex");
@@ -167,6 +173,7 @@ export async function initDb() {
       privacy_accepted_at TIMESTAMPTZ NULL,
       policy_version TEXT NULL,
       marketing_consent BOOLEAN NOT NULL DEFAULT FALSE,
+      plan_tier TEXT NOT NULL DEFAULT 'free' CHECK (plan_tier IN ('free', 'plus')),
       is_banned BOOLEAN NOT NULL DEFAULT FALSE,
       banned_reason TEXT NULL,
       banned_at TIMESTAMPTZ NULL,
@@ -209,6 +216,7 @@ export async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_accepted_at TIMESTAMPTZ NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS policy_version TEXT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS marketing_consent BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_tier TEXT NOT NULL DEFAULT 'free';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_reason TEXT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_at TIMESTAMPTZ NULL;
@@ -302,6 +310,18 @@ export async function initDb() {
       reviewed_at TIMESTAMPTZ NULL
     );
 
+    CREATE TABLE IF NOT EXISTS user_reports (
+      id TEXT PRIMARY KEY,
+      reporter_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      target_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reason TEXT NOT NULL,
+      details TEXT NULL,
+      status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'reviewed', 'closed')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      reviewed_at TIMESTAMPTZ NULL,
+      CHECK (reporter_user_id <> target_user_id)
+    );
+
     CREATE TABLE IF NOT EXISTS auth_sessions (
       token TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -337,6 +357,14 @@ export async function initDb() {
       last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS product_events (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NULL REFERENCES users(id) ON DELETE SET NULL,
+      event_name TEXT NOT NULL,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     CREATE INDEX IF NOT EXISTS idx_matches_pair ON matches (user_a_id, user_b_id);
     CREATE INDEX IF NOT EXISTS idx_matches_user_a_created ON matches (user_a_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_matches_user_b_created ON matches (user_b_id, created_at DESC);
@@ -349,12 +377,16 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_users_discovery_filter ON users (verified, gender, preferred_gender);
     CREATE INDEX IF NOT EXISTS idx_users_geo ON users (latitude, longitude);
     CREATE INDEX IF NOT EXISTS idx_verification_submissions_status ON verification_submissions (status, submitted_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_user_reports_status_created ON user_reports (status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_user_reports_target_created ON user_reports (target_user_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions (user_id);
     CREATE INDEX IF NOT EXISTS idx_auth_refresh_sessions_user ON auth_refresh_sessions (user_id);
     CREATE INDEX IF NOT EXISTS idx_auth_refresh_sessions_expires ON auth_refresh_sessions (expires_at);
     CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_created ON admin_audit_logs (created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_target ON admin_audit_logs (target_user_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_user_push_tokens_user_active ON user_push_tokens (user_id, active, last_seen_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_product_events_event_time ON product_events (event_name, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_product_events_user_time ON product_events (user_id, created_at DESC);
   `);
 
   await pool.query(`
@@ -424,19 +456,19 @@ export async function initDb() {
     );
   }
 
-  const adminPasswordHash = hashPassword(ADMIN_PASSWORD);
+  const adminPasswordHash = hashPassword(ADMIN_SEED.password);
   await pool.query(
     `INSERT INTO users (
       id, first_name, last_name, username, password_hash, is_admin, email,
       age, gender, preferred_gender, likes, dislikes, bio,
-      hobbies, prompt_one, prompt_two, prompt_three, verified, verification_status,
+      hobbies, prompt_one, prompt_two, prompt_three, verified, verification_status, plan_tier,
       photos, latitude, longitude, last_location_at, max_distance_miles
     )
     VALUES (
       'u_admin', 'Hunter', 'Bedwell', $1, $2, TRUE, $3,
       30, 'male', 'female', 'Intentional dating', 'Dishonesty', 'Founder account.',
       ARRAY['Building Vicino']::text[], 'Building a safer way to meet nearby.',
-      'Public-first meetups only.', null, TRUE, 'approved',
+      'Public-first meetups only.', null, TRUE, 'approved', 'plus',
       '[]'::jsonb, NULL, NULL, NOW(), 25
     )
     ON CONFLICT (id) DO UPDATE
@@ -446,8 +478,9 @@ export async function initDb() {
         is_admin = TRUE,
         email = EXCLUDED.email,
         verified = TRUE,
+        plan_tier = 'plus',
         verification_status = 'approved'`,
-    [ADMIN_USERNAME, adminPasswordHash, ADMIN_EMAIL]
+    [ADMIN_SEED.username, adminPasswordHash, ADMIN_SEED.email]
   );
 
   await pool.query(
@@ -456,9 +489,10 @@ export async function initDb() {
          password_hash = $2,
          email = COALESCE(email, $3),
          verified = TRUE,
+         plan_tier = 'plus',
          verification_status = 'approved'
      WHERE username = $1`,
-    [ADMIN_USERNAME, adminPasswordHash, ADMIN_EMAIL]
+    [ADMIN_SEED.username, adminPasswordHash, ADMIN_SEED.email]
   );
 
   await pool.query(

@@ -6,11 +6,13 @@ import { theme } from "../theme";
 export function ProfilePreviewModal({
   visible,
   profile,
-  onClose
+  onClose,
+  onReport
 }: {
   visible: boolean;
   profile: ProfileCard | null;
   onClose: () => void;
+  onReport?: (userId: string) => void;
 }) {
   const [photoIndex, setPhotoIndex] = useState(0);
 
@@ -83,6 +85,9 @@ export function ProfilePreviewModal({
               </View>
             ))}
           </View>
+          <Pressable style={styles.reportBtn} onPress={() => onReport?.(profile.id)}>
+            <Text style={styles.reportText}>Report Profile</Text>
+          </Pressable>
         </ScrollView>
       </View>
     </Modal>
@@ -175,5 +180,17 @@ const styles = StyleSheet.create({
   },
   qaAnswer: {
     color: theme.colors.text
+  },
+  reportBtn: {
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    backgroundColor: "#FEF2F2",
+    borderRadius: theme.radius.sm,
+    alignItems: "center",
+    paddingVertical: 12
+  },
+  reportText: {
+    color: "#B42318",
+    fontWeight: "700"
   }
 });

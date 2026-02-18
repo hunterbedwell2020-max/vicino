@@ -1,22 +1,31 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useEffect, useState } from "react";
+import { useFonts } from "expo-font";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
   AppState,
+  Dimensions,
   Image,
+  Linking,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
+  RefreshControl,
   SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   View
 } from "react-native";
 import * as Location from "expo-location";
 import {
   getAuthSession,
+  postAnalyticsEvent,
   postLogout,
+  postReportUser,
   postUserLocation,
   postUserPushToken,
   type ApiUser,
@@ -36,20 +45,53 @@ import type { ProfileCard } from "./src/types";
 
 const AUTH_TOKEN_KEY = "vicino_auth_token";
 const LOCATION_SYNC_MS = 3 * 60 * 1000;
+const SCREEN_HEIGHT = Dimensions.get("window").height;
 
 export default function App() {
+  const [fontsLoaded] = useFonts({
+    "Satoshi-Regular": require("./assets/satoshi/Satoshi-Regular.otf"),
+    "Satoshi-Medium": require("./assets/satoshi/Satoshi-Medium.otf"),
+    "Satoshi-Bold": require("./assets/satoshi/Satoshi-Bold.otf")
+  });
   const [booting, setBooting] = useState(true);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [user, setUser] = useState<ApiUser | null>(null);
   const [verification, setVerification] = useState<VerificationStatus | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [membershipOpen, setMembershipOpen] = useState(false);
+  const [privacyOpen, setPrivacyOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [previewProfile, setPreviewProfile] = useState<ProfileCard | null>(null);
   const [lastPushToken, setLastPushToken] = useState<string | null>(null);
+  const menuTranslateY = useRef(new Animated.Value(-SCREEN_HEIGHT)).current;
 
   const canAccessApp = Boolean(user && (user.isAdmin || verification?.status === "approved"));
   const activeUserId = canAccessApp && user ? user.id : null;
   const state = useVicinoState(activeUserId);
+
+  useEffect(() => {
+    if (!fontsLoaded) {
+      return;
+    }
+
+    const TextAny = Text as unknown as { defaultProps?: Record<string, unknown> };
+    const textDefaults = TextAny.defaultProps ?? {};
+    TextAny.defaultProps = {
+      ...textDefaults,
+      style: [{ fontFamily: "Satoshi-Medium" }, textDefaults.style]
+    };
+
+    const TextInputAny = TextInput as unknown as { defaultProps?: Record<string, unknown> };
+    const inputDefaults = TextInputAny.defaultProps ?? {};
+    TextInputAny.defaultProps = {
+      ...inputDefaults,
+      style: [{ fontFamily: "Satoshi-Medium" }, inputDefaults.style]
+    };
+  }, [fontsLoaded]);
 
   const hydrateSession = async () => {
     setBooting(true);
@@ -238,21 +280,114 @@ export default function App() {
     }
   };
 
+  const reportUserFromProfile = async (targetUserId: string) => {
+    if (!user?.id) {
+      return;
+    }
+    try {
+      await postReportUser(user.id, targetUserId, "inappropriate_behavior");
+      setNotice("Report submitted. Our team will review.");
+      setTimeout(() => setNotice(null), 2200);
+    } catch (err) {
+      setNotice((err as Error).message);
+      setTimeout(() => setNotice(null), 2600);
+    }
+  };
+
   const locked = !canAccessApp;
+
+  const refreshContent = async () => {
+    if (!canAccessApp || refreshing) {
+      return;
+    }
+    setRefreshing(true);
+    try {
+      await state.refreshAll();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const openMenu = () => {
+    if (menuOpen) {
+      return;
+    }
+    setMenuOpen(true);
+    menuTranslateY.setValue(-SCREEN_HEIGHT);
+    Animated.spring(menuTranslateY, {
+      toValue: 0,
+      useNativeDriver: true,
+      damping: 22,
+      stiffness: 200,
+      mass: 0.8
+    }).start();
+  };
+
+  const closeMenu = (afterClose?: () => void) => {
+    Animated.timing(menuTranslateY, {
+      toValue: -SCREEN_HEIGHT,
+      duration: 210,
+      useNativeDriver: true
+    }).start(({ finished }) => {
+      if (finished) {
+        setMenuOpen(false);
+        afterClose?.();
+      }
+    });
+  };
+
+  const headerPullResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gestureState) =>
+          Math.abs(gestureState.dy) > Math.abs(gestureState.dx) && gestureState.dy > 6,
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dy > 36) {
+            openMenu();
+          }
+        }
+      }),
+    [menuOpen]
+  );
+
+  const menuPullResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gestureState) =>
+          Math.abs(gestureState.dy) > Math.abs(gestureState.dx) && Math.abs(gestureState.dy) > 5,
+        onPanResponderMove: (_, gestureState) => {
+          if (gestureState.dy < 0) {
+            menuTranslateY.setValue(gestureState.dy);
+          }
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dy < -80) {
+            closeMenu();
+            return;
+          }
+          Animated.spring(menuTranslateY, {
+            toValue: 0,
+            useNativeDriver: true,
+            damping: 20,
+            stiffness: 220
+          }).start();
+        }
+      }),
+    [menuTranslateY]
+  );
 
   return (
     <View style={styles.root}>
       <SafeAreaView style={styles.topInset} />
       <SafeAreaView style={styles.safe}>
         <StatusBar barStyle="light-content" />
-        <View style={[styles.header, state.tab === "swipe" && styles.headerCompact]}>
+        <View style={[styles.header, styles.headerCompact]} {...headerPullResponder.panHandlers}>
           <View style={styles.headerTopRow}>
-            <View>
-              <Text style={styles.brand}>Vicino</Text>
-              <Text style={[styles.subtitle, state.tab === "swipe" && styles.subtitleCompact]}>
-                Where Better First Stories Meet
-              </Text>
-            </View>
+            <Image
+              source={require("./assets/vicino_header_left.png")}
+              style={[styles.headerLogo, styles.headerLogoCompact]}
+              resizeMode="contain"
+            />
             {!locked && user ? (
               <Pressable style={styles.profileBtn} onPress={() => setProfileOpen(true)}>
                 {user.profilePhotoUrl ? (
@@ -268,7 +403,11 @@ export default function App() {
         </View>
 
         <View style={styles.body}>
-          {booting ? (
+          {!fontsLoaded ? (
+            <View style={styles.bootCard}>
+              <Text style={styles.bootText}>Loading fonts...</Text>
+            </View>
+          ) : booting ? (
             <View style={styles.bootCard}>
               <Text style={styles.bootText}>Loading session...</Text>
             </View>
@@ -293,7 +432,14 @@ export default function App() {
 
               {state.tab === "swipe" && (
                 <View style={styles.swipeWrap}>
-                  <SwipeScreen card={state.topCard} remaining={state.deck.length} onSwipe={state.swipe} />
+                  <SwipeScreen
+                    card={state.topCard}
+                    remaining={state.deck.length}
+                    onSwipe={state.swipe}
+                    swipeError={state.swipeError}
+                    onDismissSwipeError={state.clearSwipeError}
+                    onReport={(targetUserId) => void reportUserFromProfile(targetUserId)}
+                  />
                 </View>
               )}
 
@@ -309,11 +455,17 @@ export default function App() {
                   messageCapReached={state.messageCapReached}
                   setMeetDecision={state.setMeetDecision}
                   bothMeetYes={state.bothMeetYes}
+                  showDevTools={Boolean(user?.isAdmin)}
+                  refreshing={refreshing}
+                  onRefresh={refreshContent}
                 />
               )}
 
               {state.tab === "matches" && (
-                <ScrollView contentContainerStyle={styles.scrollWrap}>
+                <ScrollView
+                  contentContainerStyle={styles.scrollWrap}
+                  refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshContent} />}
+                >
                   <ActiveMatchesScreen
                     matches={state.matches}
                     openMatchProfile={openProfilePreviewForMatch}
@@ -324,6 +476,7 @@ export default function App() {
                     startOutTonight={state.startOutTonight}
                     stopOutTonight={state.stopOutTonight}
                     simulateCandidateResponses={state.simulateCandidateResponses}
+                    showDevTools={Boolean(user?.isAdmin)}
                     chooseCandidate={state.chooseCandidate}
                     sendMeetOffer={state.sendMeetOffer}
                     respondToMeetOffer={state.respondToMeetOffer}
@@ -344,7 +497,14 @@ export default function App() {
           visible={Boolean(previewProfile)}
           profile={previewProfile}
           onClose={() => setPreviewProfile(null)}
+          onReport={(targetUserId) => void reportUserFromProfile(targetUserId)}
         />
+
+        {notice ? (
+          <View style={styles.noticeToast} pointerEvents="none">
+            <Text style={styles.noticeText}>{notice}</Text>
+          </View>
+        ) : null}
 
         {!locked ? (
           <View style={styles.footer}>
@@ -379,6 +539,188 @@ export default function App() {
             ) : null}
           </SafeAreaView>
         </Modal>
+
+        <Modal visible={menuOpen} transparent animationType="none" onRequestClose={() => closeMenu()}>
+          <Animated.View
+            style={[styles.menuPage, { transform: [{ translateY: menuTranslateY }] }]}
+            {...menuPullResponder.panHandlers}
+          >
+            <SafeAreaView style={styles.menuSafe}>
+              <View style={styles.menuHandle} />
+              <Text style={styles.menuTitle}>Vicino Menu</Text>
+
+              <Pressable
+                style={styles.menuRow}
+                onPress={() => {
+                  closeMenu(() => setProfileOpen(true));
+                }}
+              >
+                <Text style={styles.menuText}>Profile</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.menuRow}
+                onPress={() => {
+                  closeMenu(() => setSettingsOpen(true));
+                }}
+              >
+                <Text style={styles.menuText}>Settings</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.menuRow}
+                onPress={() => {
+                  closeMenu(() => setPrivacyOpen(true));
+                }}
+              >
+                <Text style={styles.menuText}>Privacy Policy</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.menuRow}
+                onPress={() => {
+                  closeMenu(() => {
+                    void Linking.openURL("mailto:support@vicino.app?subject=Vicino%20Support").catch(() => null);
+                  });
+                }}
+              >
+                <Text style={styles.menuText}>Support</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.menuRow}
+                onPress={() => {
+                  closeMenu(() => {
+                    void signOut();
+                  });
+                }}
+              >
+                <Text style={[styles.menuText, styles.menuDanger]}>Log Out</Text>
+              </Pressable>
+            </SafeAreaView>
+          </Animated.View>
+        </Modal>
+
+        <Modal visible={settingsOpen} transparent animationType="fade" onRequestClose={() => setSettingsOpen(false)}>
+          <Pressable style={styles.privacyBackdrop} onPress={() => setSettingsOpen(false)}>
+            <Pressable style={styles.policySheet} onPress={() => null}>
+              <Text style={styles.menuTitleDark}>Settings</Text>
+              <View style={styles.settingsList}>
+                <Pressable
+                  style={styles.settingsRow}
+                  onPress={() => {
+                    setSettingsOpen(false);
+                    setMembershipOpen(true);
+                    void postAnalyticsEvent("view_paywall", user?.id, { source: "settings" }).catch(() => null);
+                  }}
+                >
+                  <Text style={styles.settingsLabel}>Membership</Text>
+                  <Text style={styles.settingsValue}>
+                    {String(user?.planTier ?? "free").toLowerCase() === "plus" ? "Plus" : "Free"}
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  style={styles.settingsRow}
+                  onPress={() => {
+                    setSettingsOpen(false);
+                    setProfileOpen(true);
+                  }}
+                >
+                  <Text style={styles.settingsLabel}>Edit Profile</Text>
+                </Pressable>
+
+                <Pressable
+                  style={styles.settingsRow}
+                  onPress={() => {
+                    setSettingsOpen(false);
+                    setPrivacyOpen(true);
+                  }}
+                >
+                  <Text style={styles.settingsLabel}>Privacy Policy</Text>
+                </Pressable>
+
+                <Pressable
+                  style={styles.settingsRow}
+                  onPress={() => {
+                    setSettingsOpen(false);
+                    void Linking.openURL("mailto:support@vicino.app?subject=Vicino%20Support").catch(() => null);
+                  }}
+                >
+                  <Text style={styles.settingsLabel}>Support</Text>
+                </Pressable>
+
+                <Pressable
+                  style={styles.settingsRow}
+                  onPress={() => {
+                    setSettingsOpen(false);
+                    void signOut();
+                  }}
+                >
+                  <Text style={styles.settingsDanger}>Log Out</Text>
+                </Pressable>
+              </View>
+
+              <Pressable style={styles.menuCloseBtn} onPress={() => setSettingsOpen(false)}>
+                <Text style={styles.menuCloseText}>Close</Text>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
+        <Modal visible={membershipOpen} transparent animationType="fade" onRequestClose={() => setMembershipOpen(false)}>
+          <Pressable style={styles.privacyBackdrop} onPress={() => setMembershipOpen(false)}>
+            <Pressable style={styles.policySheet} onPress={() => null}>
+              <Text style={styles.menuTitleDark}>Vicino Membership</Text>
+              <Text style={styles.membershipBody}>
+                Free: capped daily swipes and standard messaging.
+              </Text>
+              <Text style={styles.membershipBody}>
+                Plus (coming soon): unlimited swipes and premium features.
+              </Text>
+              <Pressable
+                style={styles.membershipBtn}
+                onPress={() => {
+                  void postAnalyticsEvent("tap_upgrade_paywall", user?.id, {
+                    source: "settings_membership_modal"
+                  }).catch(() => null);
+                  void Linking.openURL(
+                    "mailto:support@vicino.app?subject=Vicino%20Plus%20Waitlist&body=Please%20add%20me%20to%20Vicino%20Plus."
+                  ).catch(() => null);
+                }}
+              >
+                <Text style={styles.membershipBtnText}>Join Plus Waitlist</Text>
+              </Pressable>
+              <Pressable style={styles.membershipSecondaryBtn} onPress={() => setMembershipOpen(false)}>
+                <Text style={styles.membershipSecondaryText}>Close</Text>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
+        <Modal visible={privacyOpen} transparent animationType="fade" onRequestClose={() => setPrivacyOpen(false)}>
+          <Pressable style={styles.privacyBackdrop} onPress={() => setPrivacyOpen(false)}>
+            <Pressable style={styles.policySheet} onPress={() => null}>
+              <Text style={styles.menuTitleDark}>Privacy Policy</Text>
+              <ScrollView style={styles.policyScroll} contentContainerStyle={styles.policyContent}>
+                <Text style={styles.policyText}>
+                  Vicino collects account details, profile content, messages, and location information to operate core
+                  dating and meetup safety features. By using Vicino, you consent to this processing and acknowledge
+                  that violating community safety standards can result in moderation action, including account
+                  suspension.
+                </Text>
+                <Text style={styles.policyText}>
+                  Identity verification submissions are reviewed for trust and safety. Data is retained only as long as
+                  needed for app operations, legal obligations, and abuse prevention. You can request account removal
+                  by contacting support.
+                </Text>
+              </ScrollView>
+              <Pressable style={styles.menuCloseBtn} onPress={() => setPrivacyOpen(false)}>
+                <Text style={styles.menuCloseText}>Close</Text>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
       </SafeAreaView>
     </View>
   );
@@ -400,8 +742,8 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: theme.colors.primary,
     paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 14,
+    paddingTop: 12,
+    paddingBottom: 10,
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20
   },
@@ -417,18 +759,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10
   },
-  brand: {
-    color: "#fff",
-    fontWeight: "800",
-    fontSize: 30
+  headerLogo: {
+    flex: 1,
+    height: 100,
+    marginRight: 2,
+    marginLeft: -113
   },
-  subtitle: {
-    marginTop: 2,
-    color: "#EADCF8"
-  },
-  subtitleCompact: {
-    marginTop: 0,
-    fontSize: 12
+  headerLogoCompact: {
+    height: 76
   },
   profileBtn: {
     width: 40,
@@ -448,13 +786,14 @@ const styles = StyleSheet.create({
   profileBtnText: {
     color: theme.colors.primary,
     fontWeight: "800",
-    fontSize: 16
+    fontSize: 16,
+    fontFamily: "Satoshi-Regular"
   },
   body: {
     flex: 1,
     backgroundColor: theme.colors.background,
     paddingHorizontal: 14,
-    paddingTop: 14
+    paddingTop: 10
   },
   bootCard: {
     backgroundColor: theme.colors.card,
@@ -462,7 +801,8 @@ const styles = StyleSheet.create({
     padding: 16
   },
   bootText: {
-    color: theme.colors.text
+    color: theme.colors.text,
+    fontFamily: "Satoshi-Medium"
   },
   scrollWrap: {
     gap: 12,
@@ -486,7 +826,8 @@ const styles = StyleSheet.create({
   matchToastTitle: {
     color: "#fff",
     fontSize: 20,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: "Satoshi-Regular"
   },
   matchToastSub: {
     color: "#F1E7FC"
@@ -496,10 +837,27 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
     gap: 8
   },
+  noticeToast: {
+    position: "absolute",
+    bottom: 92,
+    left: 18,
+    right: 18,
+    backgroundColor: "rgba(49, 28, 70, 0.95)",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    zIndex: 60
+  },
+  noticeText: {
+    color: "#fff",
+    textAlign: "center",
+    fontFamily: "Satoshi-Regular"
+  },
   errorText: {
     color: "#B42318",
     fontWeight: "700",
-    textAlign: "center"
+    textAlign: "center",
+    fontFamily: "Satoshi-Regular"
   },
   profileModalSafe: {
     flex: 1,
@@ -516,10 +874,171 @@ const styles = StyleSheet.create({
   profileModalTitle: {
     color: theme.colors.text,
     fontSize: 18,
-    fontWeight: "800"
+    fontWeight: "800",
+    fontFamily: "Satoshi-Regular"
   },
   profileModalClose: {
     color: theme.colors.primary,
-    fontWeight: "700"
+    fontWeight: "700",
+    fontFamily: "Satoshi-Regular"
+  },
+  menuPage: {
+    flex: 1,
+    backgroundColor: theme.colors.primary
+  },
+  menuSafe: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 8
+  },
+  menuHandle: {
+    width: 54,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: "#DCC7F2",
+    alignSelf: "center",
+    marginBottom: 12
+  },
+  menuTitle: {
+    paddingHorizontal: 4,
+    paddingBottom: 8,
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 18,
+    fontFamily: "Satoshi-Regular"
+  },
+  menuTitleDark: {
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 10,
+    color: theme.colors.text,
+    fontWeight: "800",
+    fontSize: 16,
+    fontFamily: "Satoshi-Regular"
+  },
+  menuRow: {
+    paddingHorizontal: 4,
+    paddingVertical: 14,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.18)"
+  },
+  menuText: {
+    color: "#fff",
+    fontSize: 17,
+    fontWeight: "700",
+    fontFamily: "Satoshi-Regular"
+  },
+  menuDanger: {
+    color: "#FFD6D6"
+  },
+  privacyBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(14, 7, 22, 0.35)",
+    justifyContent: "flex-start",
+    paddingTop: 84,
+    paddingHorizontal: 14
+  },
+  policySheet: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#EADCF8",
+    maxHeight: "68%",
+    overflow: "hidden"
+  },
+  policyScroll: {
+    maxHeight: 280
+  },
+  policyContent: {
+    paddingHorizontal: 14,
+    paddingBottom: 8,
+    gap: 10
+  },
+  policyText: {
+    color: theme.colors.text,
+    lineHeight: 20
+  },
+  settingsList: {
+    borderTopWidth: 1,
+    borderTopColor: "#EFE8F8"
+  },
+  settingsRow: {
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EFE8F8"
+  },
+  settingsRowStatic: {
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EFE8F8",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between"
+  },
+  settingsLabel: {
+    color: theme.colors.text,
+    fontSize: 15,
+    fontWeight: "600",
+    fontFamily: "Satoshi-Regular"
+  },
+  settingsValue: {
+    color: theme.colors.primary,
+    fontWeight: "700",
+    fontFamily: "Satoshi-Regular"
+  },
+  membershipBody: {
+    color: theme.colors.text,
+    paddingHorizontal: 14,
+    paddingBottom: 10,
+    lineHeight: 20
+  },
+  membershipBtn: {
+    marginHorizontal: 14,
+    marginTop: 8,
+    backgroundColor: theme.colors.primary,
+    borderRadius: 10,
+    paddingVertical: 11,
+    alignItems: "center"
+  },
+  membershipBtnText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontFamily: "Satoshi-Regular"
+  },
+  membershipSecondaryBtn: {
+    marginHorizontal: 14,
+    marginTop: 10,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "#E3D9F3",
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: "center"
+  },
+  membershipSecondaryText: {
+    color: theme.colors.primary,
+    fontWeight: "700",
+    fontFamily: "Satoshi-Regular"
+  },
+  settingsDanger: {
+    color: "#B42318",
+    fontSize: 15,
+    fontWeight: "700",
+    fontFamily: "Satoshi-Regular"
+  },
+  menuCloseBtn: {
+    margin: 14,
+    marginTop: 8,
+    backgroundColor: theme.colors.primary,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: "center"
+  },
+  menuCloseText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontFamily: "Satoshi-Regular"
   }
 });
