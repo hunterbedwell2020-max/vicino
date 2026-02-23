@@ -1,8 +1,9 @@
 import cors from "cors";
 import express from "express";
 import fs from "node:fs";
+import https from "node:https";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { initDb, pool } from "./db.js";
 import {
@@ -79,6 +80,20 @@ app.use("/uploads", express.static(uploadsDir));
 const ADMIN_REVIEW_KEY = process.env.ADMIN_REVIEW_KEY ?? "";
 const MAX_UPLOAD_BYTES = Math.max(256 * 1024, Number(process.env.MAX_UPLOAD_BYTES ?? 5 * 1024 * 1024));
 const ALLOWED_UPLOAD_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic"]);
+const AWS_REGION = process.env.AWS_REGION?.trim();
+const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID?.trim();
+const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY?.trim();
+const AWS_S3_BUCKET = process.env.AWS_S3_BUCKET?.trim();
+const AWS_S3_PUBLIC_BASE_URL = process.env.AWS_S3_PUBLIC_BASE_URL?.trim().replace(/\/+$/, "");
+
+const S3_CONFIG_KEYS = [AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_S3_BUCKET];
+const s3Configured = S3_CONFIG_KEYS.every((value) => Boolean(value));
+const s3PartiallyConfigured = S3_CONFIG_KEYS.some((value) => Boolean(value)) && !s3Configured;
+if (s3PartiallyConfigured) {
+  throw new Error(
+    "Incomplete S3 config: set AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_S3_BUCKET together."
+  );
+}
 
 const authRateLimit = createRateLimit({ windowMs: 15 * 60 * 1000, max: 50, keyPrefix: "auth" });
 const loginRateLimit = createRateLimit({ windowMs: 15 * 60 * 1000, max: 20, keyPrefix: "auth-login" });
@@ -91,6 +106,101 @@ function estimateBase64Bytes(base64Data: string) {
   const paddingMatch = body.match(/=+$/);
   const padding = paddingMatch ? paddingMatch[0].length : 0;
   return Math.floor((body.length * 3) / 4) - padding;
+}
+
+function sha256Hex(input: Buffer | string) {
+  return createHash("sha256").update(input).digest("hex");
+}
+
+function hmac(key: Buffer | string, data: string) {
+  return createHmac("sha256", key).update(data).digest();
+}
+
+function toAmzDate(date: Date) {
+  return date.toISOString().replace(/[:-]|\.\d{3}/g, "");
+}
+
+function toDateStamp(date: Date) {
+  return toAmzDate(date).slice(0, 8);
+}
+
+function encodeS3Key(key: string) {
+  return key
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+}
+
+async function uploadToS3(input: {
+  key: string;
+  body: Buffer;
+  mimeType: string;
+}) {
+  if (!s3Configured || !AWS_REGION || !AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY || !AWS_S3_BUCKET) {
+    throw new Error("S3 is not configured.");
+  }
+
+  const host = `${AWS_S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com`;
+  const now = new Date();
+  const amzDate = toAmzDate(now);
+  const dateStamp = toDateStamp(now);
+  const payloadHash = sha256Hex(input.body);
+  const canonicalUri = `/${encodeS3Key(input.key)}`;
+  const canonicalHeaders =
+    `content-type:${input.mimeType}\n` +
+    `host:${host}\n` +
+    `x-amz-content-sha256:${payloadHash}\n` +
+    `x-amz-date:${amzDate}\n`;
+  const signedHeaders = "content-type;host;x-amz-content-sha256;x-amz-date";
+  const canonicalRequest = `PUT\n${canonicalUri}\n\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`;
+  const credentialScope = `${dateStamp}/${AWS_REGION}/s3/aws4_request`;
+  const stringToSign =
+    `AWS4-HMAC-SHA256\n${amzDate}\n${credentialScope}\n${sha256Hex(canonicalRequest)}`;
+
+  const kDate = hmac(`AWS4${AWS_SECRET_ACCESS_KEY}`, dateStamp);
+  const kRegion = hmac(kDate, AWS_REGION);
+  const kService = hmac(kRegion, "s3");
+  const kSigning = hmac(kService, "aws4_request");
+  const signature = createHmac("sha256", kSigning).update(stringToSign).digest("hex");
+
+  const authorization =
+    `AWS4-HMAC-SHA256 Credential=${AWS_ACCESS_KEY_ID}/${credentialScope}, ` +
+    `SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+  await new Promise<void>((resolve, reject) => {
+    const req = https.request(
+      {
+        host,
+        method: "PUT",
+        path: canonicalUri,
+        headers: {
+          "content-type": input.mimeType,
+          "content-length": String(input.body.length),
+          "x-amz-date": amzDate,
+          "x-amz-content-sha256": payloadHash,
+          Authorization: authorization
+        }
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+        res.on("end", () => {
+          const bodyText = Buffer.concat(chunks).toString("utf8");
+          if ((res.statusCode ?? 500) >= 200 && (res.statusCode ?? 500) < 300) {
+            resolve();
+            return;
+          }
+          reject(new Error(`S3 upload failed (${res.statusCode}): ${bodyText || "Unknown error"}`));
+        });
+      }
+    );
+    req.on("error", reject);
+    req.write(input.body);
+    req.end();
+  });
+
+  const publicBase = AWS_S3_PUBLIC_BASE_URL || `https://${host}`;
+  return `${publicBase}/${encodeS3Key(input.key)}`;
 }
 
 const requireAdminAccess: express.RequestHandler = async (req, res, next) => {
@@ -161,8 +271,16 @@ app.post("/uploads/image-base64", uploadRateLimit, async (req, res) => {
     const ext = mime.includes("png") ? "png" : mime.includes("webp") ? "webp" : mime.includes("heic") ? "heic" : "jpg";
     const safeName = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${ext}`;
     const body = parsed.data.base64.replace(/^data:[^;]+;base64,/, "");
+    const buffer = Buffer.from(body, "base64");
+
+    if (s3Configured) {
+      const key = `uploads/${safeName}`;
+      const url = await uploadToS3({ key, body: buffer, mimeType: mime });
+      return res.json({ url });
+    }
+
     const target = path.join(uploadsDir, safeName);
-    await fs.promises.writeFile(target, Buffer.from(body, "base64"));
+    await fs.promises.writeFile(target, buffer);
     const host = req.get("host");
     const protocol = req.protocol;
     return res.json({ url: `${protocol}://${host}/uploads/${safeName}` });
