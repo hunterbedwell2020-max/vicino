@@ -72,6 +72,8 @@ function mapUser(row: Record<string, unknown>) {
     phone: row.phone ? String(row.phone) : null,
     isBanned: Boolean(row.is_banned),
     age: Number(row.age),
+    preferredAgeMin: Number(row.preferred_age_min ?? 18),
+    preferredAgeMax: Number(row.preferred_age_max ?? 99),
     gender: String(row.gender),
     preferredGender: row.preferred_gender ? String(row.preferred_gender) : null,
     likes: row.likes ? String(row.likes) : null,
@@ -177,7 +179,7 @@ async function createAuthTokensForUser(user: Record<string, unknown>) {
 async function fetchSessionUser(userId: string) {
   const { rows } = await pool.query(
     `SELECT id, first_name, last_name, username, is_admin, email, phone, is_banned, age, gender, preferred_gender, likes, dislikes,
-            bio, profile_photo_url, verified, photos, hobbies, prompt_one, prompt_two, prompt_three, max_distance_miles,
+            preferred_age_min, preferred_age_max, bio, profile_photo_url, verified, photos, hobbies, prompt_one, prompt_two, prompt_three, max_distance_miles,
             verification_status, verification_submitted_at, verification_reviewed_at, verification_reviewer_note, plan_tier
      FROM users
      WHERE id = $1`,
@@ -206,7 +208,7 @@ async function getUserAny(userId: string) {
   const { rows } = await pool.query(
     `SELECT id, first_name, last_name, username, password_hash, is_admin, email, phone, is_banned, age, gender, preferred_gender, likes, dislikes, bio, profile_photo_url, verified, photos,
             hobbies, prompt_one, prompt_two, prompt_three,
-            latitude, longitude, max_distance_miles, plan_tier,
+            latitude, longitude, max_distance_miles, preferred_age_min, preferred_age_max, plan_tier,
             verification_status, verification_submitted_at,
             verification_reviewed_at, verification_reviewer_note
      FROM users WHERE id = $1`,
@@ -278,7 +280,7 @@ function isPublicPlaceId(placeId: string) {
 export async function listUsers() {
   const { rows } = await pool.query(
     `SELECT id, first_name, last_name, username, is_admin, email, phone, is_banned, age, gender,
-            preferred_gender, likes, dislikes, bio, profile_photo_url, verified, photos,
+            preferred_gender, preferred_age_min, preferred_age_max, likes, dislikes, bio, profile_photo_url, verified, photos,
             hobbies, prompt_one, prompt_two, prompt_three, plan_tier,
             latitude, longitude, max_distance_miles
      FROM users
@@ -432,7 +434,7 @@ export async function registerAuthUser(input: {
         bio, verified, verification_status, photos, hobbies, max_distance_miles
       )
       VALUES ($1, $2, $3, $4, $5, $6, 18, 'other', NOW(), NOW(), $7, $8, 'free', '', FALSE, 'unsubmitted', '[]'::jsonb, ARRAY[]::text[], 25)
-      RETURNING id, first_name, last_name, username, is_admin, email, phone, age, gender, preferred_gender, likes, dislikes,
+      RETURNING id, first_name, last_name, username, is_admin, email, phone, age, preferred_age_min, preferred_age_max, gender, preferred_gender, likes, dislikes,
                 bio, verified, photos, hobbies, prompt_one, prompt_two, prompt_three, max_distance_miles, is_banned, plan_tier`,
       [
         userId,
@@ -460,7 +462,7 @@ export async function registerAuthUser(input: {
 export async function loginAuthUser(username: string, password: string) {
   const normalized = username.trim().toLowerCase();
   const { rows } = await pool.query(
-    `SELECT id, first_name, last_name, username, password_hash, is_admin, email, phone, is_banned, age, gender, preferred_gender, likes, dislikes,
+    `SELECT id, first_name, last_name, username, password_hash, is_admin, email, phone, is_banned, age, preferred_age_min, preferred_age_max, gender, preferred_gender, likes, dislikes,
             bio, profile_photo_url, verified, photos, hobbies, prompt_one, prompt_two, prompt_three, max_distance_miles, plan_tier
      FROM users
      WHERE username = $1`,
@@ -572,6 +574,8 @@ export async function updateUserProfile(
     email?: string;
     phone?: string;
     age?: number;
+    preferredAgeMin?: number;
+    preferredAgeMax?: number;
     gender?: string;
     preferredGender?: string;
     likes?: string;
@@ -594,6 +598,17 @@ export async function updateUserProfile(
   if (age != null && age < 18) {
     throw new Error("User must be 18+");
   }
+  const preferredAgeMin = updates.preferredAgeMin ?? null;
+  const preferredAgeMax = updates.preferredAgeMax ?? null;
+  if (preferredAgeMin != null && (preferredAgeMin < 18 || preferredAgeMin > 99)) {
+    throw new Error("Preferred minimum age must be between 18 and 99.");
+  }
+  if (preferredAgeMax != null && (preferredAgeMax < 18 || preferredAgeMax > 99)) {
+    throw new Error("Preferred maximum age must be between 18 and 99.");
+  }
+  if (preferredAgeMin != null && preferredAgeMax != null && preferredAgeMin > preferredAgeMax) {
+    throw new Error("Preferred age minimum cannot exceed preferred age maximum.");
+  }
   const gender = updates.gender?.trim().toLowerCase() || null;
   const preferredGender = updates.preferredGender?.trim().toLowerCase() || null;
   const likes = updates.likes?.trim() || null;
@@ -612,23 +627,27 @@ export async function updateUserProfile(
          email = COALESCE($3, email),
          phone = COALESCE($4, phone),
          age = COALESCE($5, age),
-         gender = COALESCE($6, gender),
-         preferred_gender = COALESCE($7, preferred_gender),
-         likes = COALESCE($8, likes),
-         dislikes = COALESCE($9, dislikes),
-         bio = COALESCE($10, bio),
-         profile_photo_url = COALESCE($11, profile_photo_url),
-         photos = COALESCE($12::jsonb, photos),
-         hobbies = COALESCE($13::text[], hobbies),
-         prompt_one = COALESCE($14, prompt_one),
-         prompt_two = COALESCE($15, prompt_two),
-         prompt_three = COALESCE($16, prompt_three)
+         preferred_age_min = COALESCE($6, preferred_age_min),
+         preferred_age_max = COALESCE($7, preferred_age_max),
+         gender = COALESCE($8, gender),
+         preferred_gender = COALESCE($9, preferred_gender),
+         likes = COALESCE($10, likes),
+         dislikes = COALESCE($11, dislikes),
+         bio = COALESCE($12, bio),
+         profile_photo_url = COALESCE($13, profile_photo_url),
+         photos = COALESCE($14::jsonb, photos),
+         hobbies = COALESCE($15::text[], hobbies),
+         prompt_one = COALESCE($16, prompt_one),
+         prompt_two = COALESCE($17, prompt_two),
+         prompt_three = COALESCE($18, prompt_three)
      WHERE id = $1
      RETURNING id,
                first_name AS "firstName",
                email,
                phone,
                age,
+               preferred_age_min AS "preferredAgeMin",
+               preferred_age_max AS "preferredAgeMax",
                gender,
                preferred_gender AS "preferredGender",
                likes,
@@ -648,6 +667,8 @@ export async function updateUserProfile(
       email,
       phone,
       age,
+      preferredAgeMin,
+      preferredAgeMax,
       gender,
       preferredGender,
       likes,
@@ -699,6 +720,8 @@ export async function listDiscoveryProfiles(userId: string) {
         AND u.longitude IS NOT NULL
         AND u.gender = $5
         AND u.preferred_gender = $6
+        AND u.age BETWEEN $7 AND $8
+        AND $9 BETWEEN COALESCE(u.preferred_age_min, 18) AND COALESCE(u.preferred_age_max, 99)
         AND NOT EXISTS (
           SELECT 1 FROM swipes s
           WHERE s.from_user_id = $1 AND s.to_user_id = u.id
@@ -724,7 +747,10 @@ export async function listDiscoveryProfiles(userId: string) {
       Number(user.longitude),
       Number(user.max_distance_miles ?? 25),
       String(user.preferred_gender).toLowerCase(),
-      String(user.gender).toLowerCase()
+      String(user.gender).toLowerCase(),
+      Number(user.preferred_age_min ?? 18),
+      Number(user.preferred_age_max ?? 99),
+      Number(user.age)
     ]
   );
 
@@ -1448,11 +1474,16 @@ export async function setMeetDecision(matchId: string, userId: string, decision:
     decisions[row.user_id] = row.decision;
   }
 
-  return {
-    bothYes:
-      decisions[match.user_a_id] === "yes" && decisions[match.user_b_id] === "yes",
-    decisions
-  };
+  const bothYes = decisions[match.user_a_id] === "yes" && decisions[match.user_b_id] === "yes";
+  if (bothYes) {
+    void sendPushToUsers([match.user_a_id, match.user_b_id], {
+      title: "Ready to meet",
+      body: "You both selected yes. You can now use Out tab to meet in person.",
+      data: { type: "meet_decision_both_yes", matchId }
+    }).catch(() => null);
+  }
+
+  return { bothYes, decisions };
 }
 
 export async function startAvailability(initiatorUserId: string) {
@@ -1500,12 +1531,45 @@ export async function startAvailability(initiatorUserId: string) {
     );
   }
 
+  void (async () => {
+    const initiatorRes = await pool.query(`SELECT first_name FROM users WHERE id = $1`, [initiatorUserId]);
+    const initiatorName = initiatorRes.rows[0]?.first_name ? String(initiatorRes.rows[0].first_name) : "Someone";
+    const candidateUserIds = eligible.rows.map((r) => String(r.candidate_user_id));
+    await sendPushToUsers(candidateUserIds, {
+      title: `${initiatorName} is open now`,
+      body: "Are you willing to meet them now?",
+      data: { type: "availability_request", sessionId }
+    });
+  })().catch(() => null);
+
   return {
     id: sessionRes.rows[0].id,
     initiatorUserId: sessionRes.rows[0].initiator_user_id,
     createdAt: sessionRes.rows[0].created_at,
     active: sessionRes.rows[0].active
   };
+}
+
+export async function listIncomingAvailabilityForUser(userId: string) {
+  await getUser(userId);
+  const { rows } = await pool.query(
+    `SELECT
+      sc.session_id AS "sessionId",
+      sc.match_id AS "matchId",
+      sc.response,
+      s.initiator_user_id AS "initiatorUserId",
+      s.active AS "sessionActive",
+      s.created_at AS "sessionCreatedAt",
+      u.first_name AS "initiatorFirstName"
+     FROM session_candidates sc
+     JOIN availability_sessions s ON s.id = sc.session_id
+     JOIN users u ON u.id = s.initiator_user_id
+     WHERE sc.candidate_user_id = $1
+       AND s.active = TRUE
+     ORDER BY sc.updated_at DESC`,
+    [userId]
+  );
+  return rows;
 }
 
 export async function listInterestedCandidates(sessionId: string) {

@@ -51,6 +51,8 @@ export interface ApiUser {
   email?: string | null;
   phone?: string | null;
   age: number;
+  preferredAgeMin?: number;
+  preferredAgeMax?: number;
   gender: string;
   preferredGender?: string | null;
   likes?: string | null;
@@ -108,6 +110,16 @@ export interface AvailabilityState {
   };
   candidates: AvailabilityCandidate[];
   latestOffer: ApiOffer | null;
+}
+
+export interface IncomingAvailabilityRequest {
+  sessionId: string;
+  matchId: string;
+  response: "pending" | "yes" | "no";
+  initiatorUserId: string;
+  initiatorFirstName: string;
+  sessionActive: boolean;
+  sessionCreatedAt: string;
 }
 
 export interface ApiOffer {
@@ -308,6 +320,8 @@ export function postUserProfile(
     email?: string;
     phone?: string;
     age?: number;
+    preferredAgeMin?: number;
+    preferredAgeMax?: number;
     gender?: "male" | "female" | "other";
     preferredGender?: "male" | "female" | "other";
     likes?: string;
@@ -397,6 +411,10 @@ export function postAvailabilityRespondInterest(
       body: JSON.stringify({ sessionId, userId, response })
     }
   );
+}
+
+export function getIncomingAvailability(userId: string) {
+  return request<IncomingAvailabilityRequest[]>(`/availability/incoming/${userId}`);
 }
 
 export function postAvailabilityClose(sessionId: string, initiatorUserId: string) {

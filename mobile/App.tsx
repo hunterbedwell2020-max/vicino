@@ -33,6 +33,7 @@ import {
 } from "./src/api";
 import { TabBar } from "./src/components/TabBar";
 import { ProfilePreviewModal } from "./src/components/ProfilePreviewModal";
+import { AppErrorBoundary } from "./src/components/AppErrorBoundary";
 import { AdminScreen } from "./src/screens/AdminScreen";
 import { ActiveMatchesScreen } from "./src/screens/ActiveMatchesScreen";
 import { MessagesScreen } from "./src/screens/MessagesScreen";
@@ -42,12 +43,13 @@ import { SwipeScreen } from "./src/screens/SwipeScreen";
 import { useVicinoState } from "./src/state/appState";
 import { theme } from "./src/theme";
 import type { ProfileCard } from "./src/types";
+import { initMobileSentry } from "./src/sentry";
 
 const AUTH_TOKEN_KEY = "vicino_auth_token";
 const LOCATION_SYNC_MS = 3 * 60 * 1000;
 const SCREEN_HEIGHT = Dimensions.get("window").height;
 
-export default function App() {
+function VicinoApp() {
   const [fontsLoaded] = useFonts({
     "Satoshi-Regular": require("./assets/satoshi/Satoshi-Regular.otf"),
     "Satoshi-Medium": require("./assets/satoshi/Satoshi-Medium.otf"),
@@ -70,8 +72,13 @@ export default function App() {
   const menuTranslateY = useRef(new Animated.Value(-SCREEN_HEIGHT)).current;
 
   const canAccessApp = Boolean(user && (user.isAdmin || verification?.status === "approved"));
+  const showDevTools = __DEV__ && Boolean(user?.isAdmin);
   const activeUserId = canAccessApp && user ? user.id : null;
   const state = useVicinoState(activeUserId);
+
+  useEffect(() => {
+    void initMobileSentry();
+  }, []);
 
   useEffect(() => {
     if (!fontsLoaded) {
@@ -384,7 +391,7 @@ export default function App() {
         <View style={[styles.header, styles.headerCompact]} {...headerPullResponder.panHandlers}>
           <View style={styles.headerTopRow}>
             <Image
-              source={require("./assets/vicino_header_left.png")}
+              source={require("./assets/vicinus-header.png")}
               style={[styles.headerLogo, styles.headerLogoCompact]}
               resizeMode="contain"
             />
@@ -439,6 +446,8 @@ export default function App() {
                     swipeError={state.swipeError}
                     onDismissSwipeError={state.clearSwipeError}
                     onReport={(targetUserId) => void reportUserFromProfile(targetUserId)}
+                    onRefresh={refreshContent}
+                    refreshing={refreshing}
                   />
                 </View>
               )}
@@ -455,7 +464,7 @@ export default function App() {
                   messageCapReached={state.messageCapReached}
                   setMeetDecision={state.setMeetDecision}
                   bothMeetYes={state.bothMeetYes}
-                  showDevTools={Boolean(user?.isAdmin)}
+                  showDevTools={showDevTools}
                   refreshing={refreshing}
                   onRefresh={refreshContent}
                 />
@@ -476,11 +485,12 @@ export default function App() {
                     startOutTonight={state.startOutTonight}
                     stopOutTonight={state.stopOutTonight}
                     simulateCandidateResponses={state.simulateCandidateResponses}
-                    showDevTools={Boolean(user?.isAdmin)}
+                    showDevTools={showDevTools}
                     chooseCandidate={state.chooseCandidate}
                     sendMeetOffer={state.sendMeetOffer}
                     respondToMeetOffer={state.respondToMeetOffer}
                     syncMeetupTimers={state.syncMeetupTimers}
+                    respondIncomingRequest={state.respondIncomingRequest}
                   />
                 </ScrollView>
               )}
@@ -511,7 +521,7 @@ export default function App() {
             <TabBar
               active={state.tab}
               onChange={state.setTab}
-              activeMatchesBadgeCount={state.unseenMatchCount}
+              inboxBadgeCount={state.inboxBadgeCount}
               isAdmin={Boolean(user?.isAdmin)}
             />
           </View>
@@ -526,16 +536,14 @@ export default function App() {
               </Pressable>
             </View>
             {activeUserId ? (
-              <ScrollView contentContainerStyle={styles.scrollWrap}>
-                <ProfileScreen
-                  userId={activeUserId}
-                  onProfileUpdated={setUser}
-                  onSignOut={() => {
-                    setProfileOpen(false);
-                    void signOut();
-                  }}
-                />
-              </ScrollView>
+              <ProfileScreen
+                userId={activeUserId}
+                onProfileUpdated={setUser}
+                onSignOut={() => {
+                  setProfileOpen(false);
+                  void signOut();
+                }}
+              />
             ) : null}
           </SafeAreaView>
         </Modal>
@@ -649,6 +657,10 @@ export default function App() {
                 >
                   <Text style={styles.settingsLabel}>Support</Text>
                 </Pressable>
+                <View style={styles.settingsRowStatic}>
+                  <Text style={styles.settingsLabel}>Build</Text>
+                  <Text style={styles.settingsValue}>{__DEV__ ? "Beta (Dev)" : "Beta"}</Text>
+                </View>
 
                 <Pressable
                   style={styles.settingsRow}
@@ -1042,3 +1054,11 @@ const styles = StyleSheet.create({
     fontFamily: "Satoshi-Regular"
   }
 });
+
+export default function App() {
+  return (
+    <AppErrorBoundary>
+      <VicinoApp />
+    </AppErrorBoundary>
+  );
+}

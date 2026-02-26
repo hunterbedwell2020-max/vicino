@@ -20,6 +20,7 @@ import {
   getVerificationStatus,
   listAdminUsers,
   listInterestedCandidates,
+  listIncomingAvailabilityForUser,
   listMatches,
   listDiscoveryProfiles,
   listVerificationQueue,
@@ -48,8 +49,10 @@ import {
   swipe
 } from "./logic.js";
 import { createRateLimit } from "./rateLimit.js";
+import { captureBackendError, initBackendSentry } from "./sentry.js";
 
 const app = express();
+app.set("trust proxy", true);
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
 app.use((req, res, next) => {
@@ -85,6 +88,11 @@ const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID?.trim();
 const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY?.trim();
 const AWS_S3_BUCKET = process.env.AWS_S3_BUCKET?.trim();
 const AWS_S3_PUBLIC_BASE_URL = process.env.AWS_S3_PUBLIC_BASE_URL?.trim().replace(/\/+$/, "");
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL?.trim().replace(/\/+$/, "");
+const REQUIRE_S3_UPLOADS =
+  String(process.env.REQUIRE_S3_UPLOADS ?? (process.env.NODE_ENV === "production" ? "true" : "false"))
+    .trim()
+    .toLowerCase() === "true";
 
 const S3_CONFIG_KEYS = [AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_S3_BUCKET];
 const s3Configured = S3_CONFIG_KEYS.every((value) => Boolean(value));
@@ -92,6 +100,11 @@ const s3PartiallyConfigured = S3_CONFIG_KEYS.some((value) => Boolean(value)) && 
 if (s3PartiallyConfigured) {
   throw new Error(
     "Incomplete S3 config: set AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_S3_BUCKET together."
+  );
+}
+if (REQUIRE_S3_UPLOADS && !s3Configured) {
+  throw new Error(
+    "S3 uploads are required but S3 is not configured. Set AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_S3_BUCKET."
   );
 }
 
@@ -129,6 +142,16 @@ function encodeS3Key(key: string) {
     .split("/")
     .map((part) => encodeURIComponent(part))
     .join("/");
+}
+
+function resolvePublicBaseUrl(req: express.Request) {
+  if (PUBLIC_BASE_URL) {
+    return PUBLIC_BASE_URL;
+  }
+  const host = req.get("x-forwarded-host") || req.get("host");
+  const forwardedProto = req.get("x-forwarded-proto");
+  const protocol = (forwardedProto?.split(",")[0]?.trim() || req.protocol || "https").toLowerCase();
+  return `${protocol}://${host}`;
 }
 
 async function uploadToS3(input: {
@@ -278,12 +301,14 @@ app.post("/uploads/image-base64", uploadRateLimit, async (req, res) => {
       const url = await uploadToS3({ key, body: buffer, mimeType: mime });
       return res.json({ url });
     }
+    if (REQUIRE_S3_UPLOADS) {
+      return res.status(503).json({ error: "Image uploads temporarily unavailable. S3 storage is required." });
+    }
 
     const target = path.join(uploadsDir, safeName);
     await fs.promises.writeFile(target, buffer);
-    const host = req.get("host");
-    const protocol = req.protocol;
-    return res.json({ url: `${protocol}://${host}/uploads/${safeName}` });
+    const baseUrl = resolvePublicBaseUrl(req);
+    return res.json({ url: `${baseUrl}/uploads/${safeName}` });
   } catch (err) {
     return res.status(500).json({ error: (err as Error).message });
   }
@@ -663,23 +688,33 @@ app.post("/users/:userId/preferences/distance", async (req, res) => {
 });
 
 app.post("/users/:userId/profile", async (req, res) => {
-  const schema = z.object({
-    firstName: z.string().min(1).max(60).optional(),
-    email: z.string().email().optional(),
-    phone: z.string().min(7).max(30).optional(),
-    age: z.number().int().min(18).max(99).optional(),
-    gender: z.enum(["male", "female", "other"]).optional(),
-    preferredGender: z.enum(["male", "female", "other"]).optional(),
-    likes: z.string().min(1).max(280).optional(),
-    dislikes: z.string().min(1).max(280).optional(),
-    bio: z.string().min(1).max(500).optional(),
-    profilePhotoUrl: z.string().url().optional(),
-    photos: z.array(z.string().url()).max(9).optional(),
-    hobbies: z.array(z.string().min(1).max(40)).max(12).optional(),
-    promptOne: z.string().min(1).max(280).optional(),
-    promptTwo: z.string().min(1).max(280).optional(),
-    promptThree: z.string().min(1).max(280).optional()
-  });
+  const schema = z
+    .object({
+      firstName: z.string().min(1).max(60).optional(),
+      email: z.string().email().optional(),
+      phone: z.string().min(7).max(30).optional(),
+      age: z.number().int().min(18).max(99).optional(),
+      preferredAgeMin: z.number().int().min(18).max(99).optional(),
+      preferredAgeMax: z.number().int().min(18).max(99).optional(),
+      gender: z.enum(["male", "female", "other"]).optional(),
+      preferredGender: z.enum(["male", "female", "other"]).optional(),
+      likes: z.string().min(1).max(280).optional(),
+      dislikes: z.string().min(1).max(280).optional(),
+      bio: z.string().min(1).max(500).optional(),
+      profilePhotoUrl: z.string().url().optional(),
+      photos: z.array(z.string().url()).max(9).optional(),
+      hobbies: z.array(z.string().min(1).max(40)).max(12).optional(),
+      promptOne: z.string().min(1).max(280).optional(),
+      promptTwo: z.string().min(1).max(280).optional(),
+      promptThree: z.string().min(1).max(280).optional()
+    })
+    .refine(
+      (data) =>
+        data.preferredAgeMin == null ||
+        data.preferredAgeMax == null ||
+        data.preferredAgeMin <= data.preferredAgeMax,
+      { message: "preferredAgeMin must be <= preferredAgeMax", path: ["preferredAgeMin"] }
+    );
 
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -821,6 +856,15 @@ app.get("/availability/:sessionId/candidates", async (req, res) => {
   }
 });
 
+app.get("/availability/incoming/:userId", async (req, res) => {
+  try {
+    const rows = await listIncomingAvailabilityForUser(String(req.params.userId));
+    return res.json(rows);
+  } catch (err) {
+    return res.status(400).json({ error: (err as Error).message });
+  }
+});
+
 app.post("/availability/respond-interest", userActionRateLimit, async (req, res) => {
   const schema = z.object({
     sessionId: z.string(),
@@ -924,6 +968,7 @@ app.post("/offers/:offerId/expire-location", async (req, res) => {
 const PORT = Number(process.env.PORT ?? 4000);
 
 async function start() {
+  await initBackendSentry();
   await initDb();
   const retentionResult = await purgeExpiredVerificationSubmissions().catch(() => null);
   if (retentionResult) {
@@ -942,6 +987,17 @@ async function start() {
 }
 
 start().catch((err) => {
+  captureBackendError(err, { stage: "start" });
   console.error("Failed to start backend", err);
   process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  captureBackendError(reason, { type: "unhandledRejection" });
+  console.error("Unhandled promise rejection", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  captureBackendError(error, { type: "uncaughtException" });
+  console.error("Uncaught exception", error);
 });

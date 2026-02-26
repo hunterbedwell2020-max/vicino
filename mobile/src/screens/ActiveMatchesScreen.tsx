@@ -56,7 +56,8 @@ export function ActiveMatchesScreen({
   chooseCandidate,
   sendMeetOffer,
   respondToMeetOffer,
-  syncMeetupTimers
+  syncMeetupTimers,
+  respondIncomingRequest
 }: {
   matches: MatchPreview[];
   openMatchProfile: (matchId: string) => void;
@@ -72,8 +73,9 @@ export function ActiveMatchesScreen({
   sendMeetOffer: (placeLabel: string) => void;
   respondToMeetOffer: (accept: boolean) => void;
   syncMeetupTimers: () => void;
+  respondIncomingRequest: (sessionId: string, response: "yes" | "no") => void;
 }) {
-  const [showMessagingPhase, setShowMessagingPhase] = useState(false);
+  const [showOpenToMeeting, setShowOpenToMeeting] = useState(true);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -88,7 +90,6 @@ export function ActiveMatchesScreen({
 
   const yesCandidates = outTonight.candidates.filter((candidate) => candidate.response === "yes");
   const readyMatches = matches.filter((match) => bothMeetYes(match));
-  const messagingMatches = matches.filter((match) => !bothMeetYes(match));
   const outLabel = getOutLabel();
   const meetupLocked = isMeetupLockedWindow();
 
@@ -123,6 +124,33 @@ export function ActiveMatchesScreen({
         ) : null}
         {eligibleOutCount === 0 ? <Text style={styles.flowHint}>No mutual yes matches yet.</Text> : null}
         {outTonight.error ? <Text style={styles.errorText}>{outTonight.error}</Text> : null}
+
+        {outTonight.incomingRequests.length > 0 ? (
+          <View style={styles.incomingWrap}>
+            <Text style={styles.flowTitle}>Meet requests for you</Text>
+            {outTonight.incomingRequests.map((request) => (
+              <View key={`${request.sessionId}-${request.matchId}`} style={styles.incomingCard}>
+                <Text style={styles.incomingText}>
+                  {request.initiatorFirstName} is open now. Are you willing to meet them now?
+                </Text>
+                <View style={styles.offerActions}>
+                  <Pressable
+                    style={[styles.actionBtn, styles.acceptBtn]}
+                    onPress={() => respondIncomingRequest(request.sessionId, "yes")}
+                  >
+                    <Text style={styles.actionBtnText}>Yes</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.actionBtn, styles.declineBtn]}
+                    onPress={() => respondIncomingRequest(request.sessionId, "no")}
+                  >
+                    <Text style={styles.actionBtnText}>No</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         {outTonight.enabled && (
           <View style={styles.flowWrap}>
@@ -237,47 +265,16 @@ export function ActiveMatchesScreen({
         )}
       </View>
 
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Open to meeting</Text>
-        {readyMatches.length === 0 ? <Text style={styles.flowHint}>No matches are ready yet.</Text> : null}
-      </View>
-
-      {readyMatches.map((match) => {
-        const capped = messageCapReached(match);
-        return (
-          <View key={match.id} style={styles.card}>
-            <View style={styles.matchHeaderRow}>
-              <Pressable onPress={() => openMatchProfile(match.id)}>
-                {match.avatarUrl ? (
-                  <Image source={{ uri: match.avatarUrl }} style={styles.matchAvatar} />
-                ) : (
-                  <View style={styles.matchAvatarFallback}>
-                    <Text style={styles.matchAvatarFallbackText}>
-                      {match.name.slice(0, 1).toUpperCase()}
-                    </Text>
-                  </View>
-                )}
-              </Pressable>
-              <Text style={styles.name}>{match.name}</Text>
-            </View>
-            <View style={[styles.meetBadge, styles.meetBadgeYes]}>
-              <Text style={styles.meetBadgeText}>Both said YES</Text>
-            </View>
-            {!capped ? <Text style={styles.detail}>Messaging in progress</Text> : null}
-          </View>
-        );
-      })}
-
-      <Pressable style={styles.sectionCard} onPress={() => setShowMessagingPhase((prev) => !prev)}>
+      <Pressable style={styles.sectionCard} onPress={() => setShowOpenToMeeting((prev) => !prev)}>
         <View style={styles.dropdownHeader}>
-          <Text style={styles.sectionTitle}>Messaging Phase ({messagingMatches.length})</Text>
-          <Text style={styles.dropdownCaret}>{showMessagingPhase ? "▾" : "▸"}</Text>
+          <Text style={styles.sectionTitle}>Open to meeting ({readyMatches.length})</Text>
+          <Text style={styles.dropdownCaret}>{showOpenToMeeting ? "▾" : "▸"}</Text>
         </View>
-        <Text style={styles.sectionSubtext}>People you matched with who haven’t both said yes yet.</Text>
+        <Text style={styles.sectionSubtext}>Matches where both people said yes to meeting.</Text>
       </Pressable>
 
-      {showMessagingPhase
-        ? messagingMatches.map((match) => {
+      {showOpenToMeeting
+        ? readyMatches.map((match) => {
             const capped = messageCapReached(match);
             return (
               <View key={match.id} style={styles.card}>
@@ -295,8 +292,8 @@ export function ActiveMatchesScreen({
                   </Pressable>
                   <Text style={styles.name}>{match.name}</Text>
                 </View>
-                <View style={[styles.meetBadge, styles.meetBadgePending]}>
-                  <Text style={styles.meetBadgeText}>Meet status: Not yet</Text>
+                <View style={[styles.meetBadge, styles.meetBadgeYes]}>
+                  <Text style={styles.meetBadgeText}>Both said YES</Text>
                 </View>
                 {!capped ? <Text style={styles.detail}>Messaging in progress</Text> : null}
               </View>
@@ -396,6 +393,22 @@ const styles = StyleSheet.create({
   flowTitle: { color: theme.colors.text, fontWeight: "700", fontFamily: FONT_REGULAR },
   flowHint: { color: theme.colors.muted, fontFamily: FONT_MEDIUM },
   errorText: { color: theme.colors.danger, fontWeight: "600", fontFamily: FONT_MEDIUM },
+  incomingWrap: {
+    gap: 8,
+    marginTop: 2
+  },
+  incomingCard: {
+    backgroundColor: theme.colors.card,
+    borderRadius: theme.radius.sm,
+    borderWidth: 1,
+    borderColor: "#EADCF8",
+    padding: 10,
+    gap: 8
+  },
+  incomingText: {
+    color: theme.colors.text,
+    fontFamily: FONT_MEDIUM
+  },
   candidateRow: {
     backgroundColor: theme.colors.card,
     borderRadius: theme.radius.sm,

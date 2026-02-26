@@ -9,12 +9,12 @@ const FONT_MEDIUM = "Satoshi-Medium";
 export function TabBar({
   active,
   onChange,
-  activeMatchesBadgeCount,
+  inboxBadgeCount,
   isAdmin
 }: {
   active: TabKey;
   onChange: (next: TabKey) => void;
-  activeMatchesBadgeCount: number;
+  inboxBadgeCount: number;
   isAdmin: boolean;
 }) {
   const tabs: { key: TabKey; label: string }[] = [
@@ -41,16 +41,18 @@ export function TabBar({
               <View style={[styles.logoCircle, active === tab.key && styles.logoCircleActive]}>
                 <Image source={require("../../assets/vicino-logo.png")} style={styles.logoImage} resizeMode="cover" />
               </View>
-              {activeMatchesBadgeCount > 0 ? (
+            </View>
+          ) : (
+            <View style={styles.sideTabWrap}>
+              <Text style={[styles.text, active === tab.key && styles.activeText]}>{tab.label}</Text>
+              {tab.key === "messages" && inboxBadgeCount > 0 ? (
                 <View style={styles.badge}>
                   <Text style={styles.badgeText}>
-                    {activeMatchesBadgeCount > 99 ? "99+" : activeMatchesBadgeCount}
+                    {inboxBadgeCount > 99 ? "99+" : inboxBadgeCount}
                   </Text>
                 </View>
               ) : null}
             </View>
-          ) : (
-            <Text style={[styles.text, active === tab.key && styles.activeText]}>{tab.label}</Text>
           )}
         </Pressable>
       ))}
@@ -96,6 +98,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     overflow: "visible"
   },
+  sideTabWrap: {
+    position: "relative",
+    alignItems: "center",
+    justifyContent: "center"
+  },
   logoCircle: {
     width: 60,
     height: 60,
@@ -126,8 +133,8 @@ const styles = StyleSheet.create({
   },
   badge: {
     position: "absolute",
-    top: -9,
-    right: -10,
+    top: -8,
+    right: -12,
     backgroundColor: theme.colors.danger,
     borderRadius: 999,
     minWidth: 16,

@@ -3,7 +3,6 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   RefreshControl,
@@ -53,11 +52,11 @@ export function MessagesScreen({
 }) {
   const [compose, setCompose] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [meetPromptOpen, setMeetPromptOpen] = useState(false);
   const listRef = useRef<FlatList<{ id: string; sender: "me" | "them"; body: string }>>(null);
 
   const capReached = activeMatch ? messageCapReached(activeMatch) : false;
-
-  const shouldForceDecision = Boolean(activeMatch && capReached && activeMatch.meetDecisionByMe === null);
 
   const formatInboxTime = (value?: string) => {
     if (!value) {
@@ -101,92 +100,29 @@ export function MessagesScreen({
   }, [matches, messageCapReached]);
 
   const meetSummary = useMemo(() => {
-    if (!activeMatch) {
+    if (!activeMatch || bothMeetYes(activeMatch)) {
       return null;
     }
 
     return (
-      <View style={styles.promptCard}>
-        <View style={styles.promptRow}>
-          <Text style={styles.promptLabel}>Your answer:</Text>
-          <View style={styles.promptActions}>
-            <Pressable
-              style={[styles.promptBtn, activeMatch.meetDecisionByMe === "yes" && styles.promptBtnYes]}
-              onPress={() => setMeetDecision(activeMatch.id, "me", "yes")}
-            >
-              <Text style={styles.promptBtnText}>Yes</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.promptBtn, activeMatch.meetDecisionByMe === "no" && styles.promptBtnNo]}
-              onPress={() => setMeetDecision(activeMatch.id, "me", "no")}
-            >
-              <Text style={styles.promptBtnText}>No</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        {showDevTools ? (
-          <View style={styles.promptRow}>
-            <Text style={styles.promptLabel}>Simulate their answer:</Text>
-            <View style={styles.promptActions}>
-              <Pressable
-                style={[styles.promptBtn, activeMatch.meetDecisionByThem === "yes" && styles.promptBtnYes]}
-                onPress={() => setMeetDecision(activeMatch.id, "them", "yes")}
-              >
-                <Text style={styles.promptBtnText}>Yes</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.promptBtn, activeMatch.meetDecisionByThem === "no" && styles.promptBtnNo]}
-                onPress={() => setMeetDecision(activeMatch.id, "them", "no")}
-              >
-                <Text style={styles.promptBtnText}>No</Text>
-              </Pressable>
-            </View>
-          </View>
-        ) : null}
-
-        <Text style={styles.promptStatus}>
-          {bothMeetYes(activeMatch)
-            ? "Both selected YES. This match is now eligible for the 'I am out and open to meeting' flow."
-            : capReached
-              ? "Your answer is saved. Waiting for the other person to answer."
-              : "You can answer now or later. Both YES is required for out-tonight eligibility."}
-        </Text>
-      </View>
-    );
-  }, [activeMatch, capReached, bothMeetYes, setMeetDecision]);
-
-  const decisionModal = useMemo(() => {
-    if (!activeMatch || !shouldForceDecision) {
-      return null;
-    }
-
-    return (
-      <Modal transparent animationType="fade" visible>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.promptTitle}>Would you like to meet this person?</Text>
-            <Text style={styles.modalSub}>
-              60 total messages reached. Both people must decide before this chat can move forward.
-            </Text>
-
+      <View style={styles.promptCompactCard}>
+        <Pressable style={styles.promptCompactHeader} onPress={() => setMeetPromptOpen((prev) => !prev)}>
+          <Text style={styles.promptCompactTitle}>Would you like to meet?</Text>
+          <Text style={styles.promptCompactCaret}>{meetPromptOpen ? "▾" : "▸"}</Text>
+        </Pressable>
+        {!meetPromptOpen ? null : (
+          <>
             <View style={styles.promptRow}>
               <Text style={styles.promptLabel}>Your answer:</Text>
               <View style={styles.promptActions}>
                 <Pressable
-                  style={[
-                    styles.promptBtn,
-                    activeMatch.meetDecisionByMe === "yes" && styles.promptBtnYes
-                  ]}
+                  style={[styles.promptBtn, activeMatch.meetDecisionByMe === "yes" && styles.promptBtnYes]}
                   onPress={() => setMeetDecision(activeMatch.id, "me", "yes")}
                 >
                   <Text style={styles.promptBtnText}>Yes</Text>
                 </Pressable>
                 <Pressable
-                  style={[
-                    styles.promptBtn,
-                    activeMatch.meetDecisionByMe === "no" && styles.promptBtnNo
-                  ]}
+                  style={[styles.promptBtn, activeMatch.meetDecisionByMe === "no" && styles.promptBtnNo]}
                   onPress={() => setMeetDecision(activeMatch.id, "me", "no")}
                 >
                   <Text style={styles.promptBtnText}>No</Text>
@@ -199,19 +135,13 @@ export function MessagesScreen({
                 <Text style={styles.promptLabel}>Simulate their answer:</Text>
                 <View style={styles.promptActions}>
                   <Pressable
-                    style={[
-                      styles.promptBtn,
-                      activeMatch.meetDecisionByThem === "yes" && styles.promptBtnYes
-                    ]}
+                    style={[styles.promptBtn, activeMatch.meetDecisionByThem === "yes" && styles.promptBtnYes]}
                     onPress={() => setMeetDecision(activeMatch.id, "them", "yes")}
                   >
                     <Text style={styles.promptBtnText}>Yes</Text>
                   </Pressable>
                   <Pressable
-                    style={[
-                      styles.promptBtn,
-                      activeMatch.meetDecisionByThem === "no" && styles.promptBtnNo
-                    ]}
+                    style={[styles.promptBtn, activeMatch.meetDecisionByThem === "no" && styles.promptBtnNo]}
                     onPress={() => setMeetDecision(activeMatch.id, "them", "no")}
                   >
                     <Text style={styles.promptBtnText}>No</Text>
@@ -219,17 +149,19 @@ export function MessagesScreen({
                 </View>
               </View>
             ) : null}
-          </View>
-        </View>
-      </Modal>
+
+            <Text style={styles.promptStatus}>
+              {capReached
+                ? "Messages capped. Waiting for both decisions."
+                : "You can decide now or later. Both need to select yes."}
+            </Text>
+          </>
+        )}
+      </View>
     );
-  }, [activeMatch, shouldForceDecision, setMeetDecision]);
+  }, [activeMatch, capReached, bothMeetYes, setMeetDecision, showDevTools, meetPromptOpen]);
 
   const closeChatWithGuard = () => {
-    if (shouldForceDecision) {
-      setError("Meet decision required before leaving this chat.");
-      return;
-    }
     closeChat();
   };
 
@@ -297,13 +229,21 @@ export function MessagesScreen({
   }
 
   const sendMine = async () => {
-    const result = await sendMessage(activeMatch.id, "me", compose);
-    if (!result.ok) {
-      setError(result.error);
+    if (sending) {
       return;
     }
-    setError(null);
-    setCompose("");
+    setSending(true);
+    try {
+      const result = await sendMessage(activeMatch.id, "me", compose);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setError(null);
+      setCompose("");
+    } finally {
+      setSending(false);
+    }
   };
 
   const sendTheirs = async () => {
@@ -344,6 +284,8 @@ export function MessagesScreen({
         </Text>
       </View>
 
+      {meetSummary}
+
       <FlatList
         ref={listRef}
         data={activeMatch.chat}
@@ -360,8 +302,6 @@ export function MessagesScreen({
         )}
       />
 
-      {meetSummary}
-
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       {!capReached && (
@@ -376,11 +316,16 @@ export function MessagesScreen({
               returnKeyType="send"
               onSubmitEditing={() => void sendMine()}
             />
-            <Pressable style={styles.sendFab} onPress={() => void sendMine()}>
-              <Text style={styles.sendFabIcon}>✈</Text>
+            <Pressable style={[styles.sendFab, sending && styles.sendFabDisabled]} onPress={() => void sendMine()} disabled={sending}>
+              <Text style={styles.sendFabIcon}>{sending ? "..." : "✈"}</Text>
             </Pressable>
           </View>
           <View style={styles.composeActions}>
+            {error ? (
+              <Pressable style={[styles.composeBtn, styles.retryBtn]} onPress={() => void sendMine()} disabled={sending}>
+                <Text style={[styles.composeBtnText, styles.retryBtnText]}>Retry Send</Text>
+              </Pressable>
+            ) : null}
             {showDevTools ? (
               <Pressable style={[styles.composeBtn, styles.replyBtn]} onPress={sendTheirs}>
                 <Text style={styles.composeBtnText}>Sim Reply</Text>
@@ -390,7 +335,6 @@ export function MessagesScreen({
         </View>
       )}
 
-      {decisionModal}
     </KeyboardAvoidingView>
   );
 }
@@ -533,16 +477,31 @@ const styles = StyleSheet.create({
   bubbleText: { color: theme.colors.text, fontFamily: FONT_MEDIUM },
   myBubbleText: { color: "#fff", fontFamily: FONT_MEDIUM },
 
-  promptCard: {
+  promptCompactCard: {
     backgroundColor: theme.colors.card,
     borderRadius: theme.radius.md,
     borderWidth: 1,
     borderColor: "#EADCF8",
     padding: 12,
-    gap: 10
+    gap: 8
   },
-  promptTitle: { color: theme.colors.text, fontSize: 16, fontWeight: "700", fontFamily: FONT_REGULAR },
-  modalSub: { color: theme.colors.muted, marginTop: 6, marginBottom: 6, fontFamily: FONT_MEDIUM },
+  promptCompactHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between"
+  },
+  promptCompactTitle: {
+    color: theme.colors.text,
+    fontSize: 14,
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR
+  },
+  promptCompactCaret: {
+    color: theme.colors.primary,
+    fontSize: 14,
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR
+  },
   promptRow: { gap: 6 },
   promptLabel: { color: theme.colors.muted, fontFamily: FONT_MEDIUM },
   promptActions: { flexDirection: "row", gap: 8 },
@@ -589,6 +548,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
+  sendFabDisabled: { opacity: 0.7 },
   sendFabIcon: {
     color: "#fff",
     fontSize: 17,
@@ -604,6 +564,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 9
   },
+  retryBtn: { backgroundColor: "#F3ECFB" },
+  retryBtnText: { color: theme.colors.primary },
   replyBtn: { backgroundColor: theme.colors.primaryLight },
   composeBtnText: { color: "#fff", fontWeight: "700", fontFamily: FONT_REGULAR },
   error: { color: theme.colors.danger, fontWeight: "600", fontFamily: FONT_MEDIUM },

@@ -57,4 +57,11 @@ export interface OutTonightState {
   offerRespondBy: number | null;
   locationExpiresAt: number | null;
   coordinationEndsAt: number | null;
+  incomingRequests: Array<{
+    sessionId: string;
+    matchId: string;
+    initiatorUserId: string;
+    initiatorFirstName: string;
+    response: CandidateResponse;
+  }>;
 }

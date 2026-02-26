@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   getAvailabilityState,
   getDiscovery,
+  getIncomingAvailability,
   getMatches,
   getMessages,
   getUsers,
@@ -44,7 +45,8 @@ const emptyOutTonight = (): OutTonightState => ({
   offerStatus: "idle",
   offerRespondBy: null,
   locationExpiresAt: null,
-  coordinationEndsAt: null
+  coordinationEndsAt: null,
+  incomingRequests: []
 });
 
 const toDeckCard = (user: ApiUser): ProfileCard => ({
@@ -176,8 +178,35 @@ export function useVicinoState(currentUserId: string | null) {
     setDeck(discovery.map(toDeckCard));
   };
 
+  const refreshDiscoveryOnly = async () => {
+    if (!currentUserId) {
+      setDeck([]);
+      return;
+    }
+    const discovery = await getDiscovery(currentUserId);
+    setDeck(discovery.map(toDeckCard));
+  };
+
+  const refreshIncomingAvailability = async () => {
+    if (!currentUserId) {
+      return;
+    }
+    const rows = await getIncomingAvailability(currentUserId);
+    setOutTonight((prev) => ({
+      ...prev,
+      incomingRequests: rows.map((row) => ({
+        sessionId: row.sessionId,
+        matchId: row.matchId,
+        initiatorUserId: row.initiatorUserId,
+        initiatorFirstName: row.initiatorFirstName,
+        response: row.response
+      }))
+    }));
+  };
+
   const refreshAll = async () => {
     await refreshFromApi().catch(() => null);
+    await refreshIncomingAvailability().catch(() => null);
     if (outTonight.sessionId) {
       await refreshOutTonightState(outTonight.sessionId).catch(() => null);
     }
@@ -202,7 +231,8 @@ export function useVicinoState(currentUserId: string | null) {
           prev.selectedCandidateMatchId && state.candidates.some((c) => c.matchId === prev.selectedCandidateMatchId)
             ? prev.selectedCandidateMatchId
             : prev.selectedCandidateMatchId,
-        coordinationEndsAt: prev.coordinationEndsAt
+        coordinationEndsAt: prev.coordinationEndsAt,
+        incomingRequests: prev.incomingRequests
       };
       return applyOffer(next, state.latestOffer);
     });
@@ -211,8 +241,8 @@ export function useVicinoState(currentUserId: string | null) {
   useEffect(() => {
     refreshFromApi().catch(() => {
       setUsersById({});
-      setDeck(swipeDeckSeed);
-      setMatches(matchSeed);
+      setDeck(__DEV__ ? swipeDeckSeed : []);
+      setMatches(__DEV__ ? matchSeed : []);
     });
 
     return () => {
@@ -223,7 +253,14 @@ export function useVicinoState(currentUserId: string | null) {
   }, [currentUserId]);
 
   useEffect(() => {
-    if (tab !== "matches" || matches.length === 0) {
+    if (!currentUserId) {
+      return;
+    }
+    void refreshIncomingAvailability().catch(() => null);
+  }, [currentUserId]);
+
+  useEffect(() => {
+    if (tab !== "messages" || matches.length === 0) {
       return;
     }
 
@@ -235,6 +272,37 @@ export function useVicinoState(currentUserId: string | null) {
       return next;
     });
   }, [tab, matches]);
+
+  useEffect(() => {
+    if (!activeChatMatchId) {
+      return;
+    }
+    const interval = setInterval(() => {
+      void getMessages(activeChatMatchId)
+        .then((messages) => {
+          setMatches((prev) =>
+            prev.map((m) => {
+              if (m.id !== activeChatMatchId) {
+                return m;
+              }
+              return {
+                ...m,
+                chat: messages.map((msg) => ({
+                  id: msg.id,
+                  sender: msg.senderUserId === currentUserId ? "me" : "them",
+                  body: msg.body,
+                  createdAt: msg.createdAt
+                })),
+                messagesUsedByMe: messages.filter((msg) => msg.senderUserId === currentUserId).length,
+                messagesUsedByThem: messages.filter((msg) => msg.senderUserId !== currentUserId).length
+              };
+            })
+          );
+        })
+        .catch(() => null);
+    }, 1500);
+    return () => clearInterval(interval);
+  }, [activeChatMatchId, currentUserId]);
 
   const swipe = (decision: "left" | "right") => {
     const current = topCard;
@@ -426,7 +494,8 @@ export function useVicinoState(currentUserId: string | null) {
         offerStatus: "idle",
         offerRespondBy: null,
         locationExpiresAt: null,
-        coordinationEndsAt: null
+        coordinationEndsAt: null,
+        incomingRequests: outTonight.incomingRequests
       };
       setOutTonight(next);
     } catch (err) {
@@ -444,7 +513,7 @@ export function useVicinoState(currentUserId: string | null) {
     if (outTonight.sessionId) {
       await postAvailabilityClose(outTonight.sessionId, currentUserId).catch(() => null);
     }
-    setOutTonight(emptyOutTonight());
+    setOutTonight((prev) => ({ ...emptyOutTonight(), incomingRequests: prev.incomingRequests }));
   };
 
   const simulateCandidateResponses = async () => {
@@ -525,6 +594,17 @@ export function useVicinoState(currentUserId: string | null) {
     });
   };
 
+  const respondIncomingRequest = async (sessionId: string, response: "yes" | "no") => {
+    if (!currentUserId) {
+      return;
+    }
+    await postAvailabilityRespondInterest(sessionId, currentUserId, response).catch(() => null);
+    await refreshIncomingAvailability().catch(() => null);
+    if (outTonight.sessionId === sessionId) {
+      await refreshOutTonightState(sessionId).catch(() => null);
+    }
+  };
+
   const syncMeetupTimers = () => {
     setOutTonight((prev) => {
       const nowTs = Date.now();
@@ -538,6 +618,10 @@ export function useVicinoState(currentUserId: string | null) {
     });
 
     if (!outTonight.sessionId) {
+      if (Date.now() - outTonightSyncRef.current > 7000) {
+        outTonightSyncRef.current = Date.now();
+        void refreshIncomingAvailability().catch(() => null);
+      }
       return;
     }
 
@@ -591,6 +675,7 @@ export function useVicinoState(currentUserId: string | null) {
     swipeError,
     clearSwipeError: () => setSwipeError(null),
     unseenMatchCount,
+    inboxBadgeCount: unseenMatchCount,
     matchToastName,
     stats,
     swipe,
@@ -605,7 +690,9 @@ export function useVicinoState(currentUserId: string | null) {
     chooseCandidate,
     sendMeetOffer,
     respondToMeetOffer,
+    respondIncomingRequest,
     syncMeetupTimers,
+    refreshDiscoveryOnly,
     refreshAll,
     getProfileCardByMatchId,
     openChat,

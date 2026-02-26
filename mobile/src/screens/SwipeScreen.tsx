@@ -32,7 +32,9 @@ export function SwipeScreen({
   onSwipe,
   swipeError,
   onDismissSwipeError,
-  onReport
+  onReport,
+  onRefresh,
+  refreshing = false
 }: {
   card: ProfileCard | null;
   remaining: number;
@@ -40,6 +42,8 @@ export function SwipeScreen({
   swipeError?: string | null;
   onDismissSwipeError?: () => void;
   onReport?: (userId: string) => void;
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }) {
   const pan = useRef(new Animated.ValueXY()).current;
   const swipingOutRef = useRef(false);
@@ -287,6 +291,11 @@ export function SwipeScreen({
 
   return (
     <View style={styles.wrap}>
+      <View style={styles.refreshRow}>
+        <Pressable style={styles.refreshBtn} onPress={onRefresh} disabled={refreshing}>
+          <Text style={styles.refreshBtnText}>{refreshing ? "Refreshing..." : "Refresh profiles"}</Text>
+        </Pressable>
+      </View>
       {swipeError ? (
         <Pressable style={styles.swipeErrorBox} onPress={onDismissSwipeError}>
           <Text style={styles.swipeErrorText}>{swipeError}</Text>
@@ -403,6 +412,21 @@ export function SwipeScreen({
 
 const styles = StyleSheet.create({
   wrap: { gap: 10, flex: 1 },
+  refreshRow: {
+    alignItems: "flex-end"
+  },
+  refreshBtn: {
+    backgroundColor: "#EDE7F6",
+    borderRadius: theme.radius.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 6
+  },
+  refreshBtnText: {
+    color: theme.colors.primary,
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR,
+    fontSize: 12
+  },
   swipeErrorBox: {
     backgroundColor: "#FEE4E2",
     borderRadius: theme.radius.sm,

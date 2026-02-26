@@ -178,6 +178,8 @@ export async function initDb() {
       banned_reason TEXT NULL,
       banned_at TIMESTAMPTZ NULL,
       age INT NOT NULL,
+      preferred_age_min INT NOT NULL DEFAULT 18,
+      preferred_age_max INT NOT NULL DEFAULT 99,
       gender TEXT NOT NULL,
       preferred_gender TEXT NULL,
       likes TEXT NULL,
@@ -221,6 +223,8 @@ export async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_reason TEXT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_at TIMESTAMPTZ NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_gender TEXT NULL;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_age_min INT NOT NULL DEFAULT 18;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_age_max INT NOT NULL DEFAULT 99;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS likes TEXT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS dislikes TEXT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NULL;
@@ -375,6 +379,7 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_swipes_from_created ON swipes (from_user_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_swipes_to_decision ON swipes (to_user_id, decision);
     CREATE INDEX IF NOT EXISTS idx_users_discovery_filter ON users (verified, gender, preferred_gender);
+    CREATE INDEX IF NOT EXISTS idx_users_age_pref_filter ON users (preferred_age_min, preferred_age_max, age);
     CREATE INDEX IF NOT EXISTS idx_users_geo ON users (latitude, longitude);
     CREATE INDEX IF NOT EXISTS idx_verification_submissions_status ON verification_submissions (status, submitted_at DESC);
     CREATE INDEX IF NOT EXISTS idx_user_reports_status_created ON user_reports (status, created_at DESC);
@@ -402,10 +407,10 @@ export async function initDb() {
     await pool.query(
       `INSERT INTO users (
          id, first_name, last_name, email, phone, age, gender, preferred_gender, likes, dislikes,
-         bio, hobbies, prompt_one, prompt_two, prompt_three, verified, photos,
+         preferred_age_min, preferred_age_max, bio, hobbies, prompt_one, prompt_two, prompt_three, verified, photos,
          latitude, longitude, last_location_at, max_distance_miles
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::text[], $13, $14, $15, $16, $17::jsonb, $18, $19, NOW(), $20)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 18, 99, $11, $12::text[], $13, $14, $15, $16, $17::jsonb, $18, $19, NOW(), $20)
        ON CONFLICT (id) DO UPDATE
        SET first_name = EXCLUDED.first_name,
            last_name = EXCLUDED.last_name,
@@ -414,6 +419,8 @@ export async function initDb() {
            age = EXCLUDED.age,
            gender = EXCLUDED.gender,
            preferred_gender = EXCLUDED.preferred_gender,
+           preferred_age_min = EXCLUDED.preferred_age_min,
+           preferred_age_max = EXCLUDED.preferred_age_max,
            likes = EXCLUDED.likes,
            dislikes = EXCLUDED.dislikes,
            bio = EXCLUDED.bio,
@@ -461,12 +468,13 @@ export async function initDb() {
     `INSERT INTO users (
       id, first_name, last_name, username, password_hash, is_admin, email,
       age, gender, preferred_gender, likes, dislikes, bio,
+      preferred_age_min, preferred_age_max,
       hobbies, prompt_one, prompt_two, prompt_three, verified, verification_status, plan_tier,
       photos, latitude, longitude, last_location_at, max_distance_miles
     )
     VALUES (
       'u_admin', 'Hunter', 'Bedwell', $1, $2, TRUE, $3,
-      30, 'male', 'female', 'Intentional dating', 'Dishonesty', 'Founder account.',
+      30, 'male', 'female', 'Intentional dating', 'Dishonesty', 'Founder account.', 18, 99,
       ARRAY['Building Vicino']::text[], 'Building a safer way to meet nearby.',
       'Public-first meetups only.', null, TRUE, 'approved', 'plus',
       '[]'::jsonb, NULL, NULL, NOW(), 25
