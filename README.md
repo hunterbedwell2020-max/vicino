@@ -40,6 +40,9 @@ export AWS_REGION="<YOUR_AWS_REGION>"
 export AWS_ACCESS_KEY_ID="<YOUR_AWS_ACCESS_KEY_ID>"
 export AWS_SECRET_ACCESS_KEY="<YOUR_AWS_SECRET_ACCESS_KEY>"
 export AWS_S3_BUCKET="<YOUR_S3_BUCKET>"
+export SENTRY_DSN="<YOUR_SENTRY_DSN>"
+export SENTRY_ENVIRONMENT="development"
+export RELEASE_VERSION="vicino-backend@0.1.0"
 export PUSH_NOTIFICATIONS_ENABLED="true"
 npm run migrate
 npm run dev
@@ -54,6 +57,9 @@ cd "/Users/hunterbedwell/Documents/Twitch bot/mobile"
 npm install
 npx expo install expo-notifications
 export EXPO_PUBLIC_API_BASE_URL="http://localhost:4000"
+export EXPO_PUBLIC_SENTRY_DSN="<YOUR_MOBILE_SENTRY_DSN>"
+export EXPO_PUBLIC_SENTRY_ENVIRONMENT="development"
+export EXPO_PUBLIC_RELEASE_VERSION="vicino-mobile@0.1.0"
 npm run start
 ```
 
@@ -93,6 +99,29 @@ npx eas submit --platform ios --profile production
 3. Add legal links/screens in-app using the policy files in `docs/`.
 4. Add report/block + trust score signals to moderation pipeline.
 5. Add analytics/events for conversion funnel and retention.
+
+## Sentry setup (mobile + backend)
+
+Install packages:
+
+```bash
+cd "/Users/hunterbedwell/Documents/Twitch bot/backend"
+npm install @sentry/node
+
+cd "/Users/hunterbedwell/Documents/Twitch bot/mobile"
+npm install @sentry/react-native
+```
+
+Then set:
+
+- Backend:
+  - `SENTRY_DSN`
+  - `SENTRY_ENVIRONMENT` (`production` on Railway)
+  - `RELEASE_VERSION` (example `vicino-backend@0.1.0`)
+- Mobile:
+  - `EXPO_PUBLIC_SENTRY_DSN`
+  - `EXPO_PUBLIC_SENTRY_ENVIRONMENT` (`production` for TestFlight)
+  - `EXPO_PUBLIC_RELEASE_VERSION` (example `vicino-mobile@0.1.0`)
 
 ## Legal policy files
 

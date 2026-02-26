@@ -29,11 +29,12 @@ export function TabBar({
         <Pressable
           key={tab.key}
           onPress={() => onChange(tab.key)}
-          style={[
+          style={({ pressed }) => [
             styles.item,
             tab.key !== "matches" && styles.sideItem,
             tab.key === "matches" && styles.centerItem,
-            active === tab.key && tab.key !== "matches" && styles.activeItem
+            active === tab.key && tab.key !== "matches" && styles.activeItem,
+            pressed && styles.pressedItem
           ]}
         >
           {tab.key === "matches" ? (
@@ -57,7 +58,10 @@ export function TabBar({
         </Pressable>
       ))}
       {isAdmin ? (
-        <Pressable style={[styles.adminPill, active === "admin" && styles.adminPillActive]} onPress={() => onChange("admin")}>
+        <Pressable
+          style={({ pressed }) => [styles.adminPill, active === "admin" && styles.adminPillActive, pressed && styles.pressedItem]}
+          onPress={() => onChange("admin")}
+        >
           <Text style={[styles.adminPillText, active === "admin" && styles.adminPillTextActive]}>Admin</Text>
         </Pressable>
       ) : null}
@@ -174,5 +178,8 @@ const styles = StyleSheet.create({
   },
   adminPillTextActive: {
     color: "#fff"
+  },
+  pressedItem: {
+    opacity: 0.78
   }
 });

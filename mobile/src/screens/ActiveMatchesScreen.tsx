@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import type { MatchPreview, OutTonightState } from "../types";
 import { theme } from "../theme";
 
@@ -76,6 +76,19 @@ export function ActiveMatchesScreen({
   respondIncomingRequest: (sessionId: string, response: "yes" | "no") => void;
 }) {
   const [showOpenToMeeting, setShowOpenToMeeting] = useState(true);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+
+  const runBusy = async (key: string, task: () => Promise<void> | void) => {
+    if (busyAction) {
+      return;
+    }
+    setBusyAction(key);
+    try {
+      await Promise.resolve(task());
+    } finally {
+      setBusyAction(null);
+    }
+  };
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -102,20 +115,33 @@ export function ActiveMatchesScreen({
           {!outTonight.enabled ? (
             <View style={styles.logoActionWrap}>
               <Pressable
-                style={[
+                style={({ pressed }) => [
                   styles.logoBtn,
-                  (eligibleOutCount === 0 || meetupLocked) && styles.actionBtnDisabled
+                  (eligibleOutCount === 0 || meetupLocked || Boolean(busyAction)) && styles.actionBtnDisabled,
+                  pressed && styles.pressedBtn
                 ]}
-                disabled={eligibleOutCount === 0 || meetupLocked}
-                onPress={startOutTonight}
+                disabled={eligibleOutCount === 0 || meetupLocked || Boolean(busyAction)}
+                onPress={() => void runBusy("open", startOutTonight)}
               >
                 <Text style={styles.logoMark}>🤝</Text>
-                <Text style={styles.logoBtnText}>Go Open</Text>
+                {busyAction === "open" ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.logoBtnText}>Go Open</Text>
+                )}
               </Pressable>
             </View>
           ) : (
-            <Pressable style={[styles.actionBtn, styles.closeBtn]} onPress={stopOutTonight}>
-              <Text style={styles.actionBtnText}>Close Session</Text>
+            <Pressable
+              style={({ pressed }) => [styles.actionBtn, styles.closeBtn, pressed && styles.pressedBtn]}
+              onPress={() => void runBusy("close", stopOutTonight)}
+              disabled={Boolean(busyAction)}
+            >
+              {busyAction === "close" ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.actionBtnText}>Close Session</Text>
+              )}
             </Pressable>
           )}
         </View>
@@ -135,16 +161,34 @@ export function ActiveMatchesScreen({
                 </Text>
                 <View style={styles.offerActions}>
                   <Pressable
-                    style={[styles.actionBtn, styles.acceptBtn]}
-                    onPress={() => respondIncomingRequest(request.sessionId, "yes")}
+                    style={({ pressed }) => [styles.actionBtn, styles.acceptBtn, pressed && styles.pressedBtn]}
+                    onPress={() =>
+                      void runBusy(`incoming-yes-${request.sessionId}`, () =>
+                        respondIncomingRequest(request.sessionId, "yes")
+                      )
+                    }
+                    disabled={Boolean(busyAction)}
                   >
-                    <Text style={styles.actionBtnText}>Yes</Text>
+                    {busyAction === `incoming-yes-${request.sessionId}` ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text style={styles.actionBtnText}>Yes</Text>
+                    )}
                   </Pressable>
                   <Pressable
-                    style={[styles.actionBtn, styles.declineBtn]}
-                    onPress={() => respondIncomingRequest(request.sessionId, "no")}
+                    style={({ pressed }) => [styles.actionBtn, styles.declineBtn, pressed && styles.pressedBtn]}
+                    onPress={() =>
+                      void runBusy(`incoming-no-${request.sessionId}`, () =>
+                        respondIncomingRequest(request.sessionId, "no")
+                      )
+                    }
+                    disabled={Boolean(busyAction)}
                   >
-                    <Text style={styles.actionBtnText}>No</Text>
+                    {busyAction === `incoming-no-${request.sessionId}` ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text style={styles.actionBtnText}>No</Text>
+                    )}
                   </Pressable>
                 </View>
               </View>
@@ -156,7 +200,11 @@ export function ActiveMatchesScreen({
           <View style={styles.flowWrap}>
             <Text style={styles.flowTitle}>Interested now</Text>
             {showDevTools ? (
-              <Pressable style={[styles.actionBtn, styles.secondaryBtn]} onPress={simulateCandidateResponses}>
+              <Pressable
+                style={({ pressed }) => [styles.actionBtn, styles.secondaryBtn, pressed && styles.pressedBtn]}
+                onPress={() => void runBusy("refresh-responses", simulateCandidateResponses)}
+                disabled={Boolean(busyAction)}
+              >
                 <Text style={styles.actionBtnText}>Refresh Responses</Text>
               </Pressable>
             ) : null}
@@ -191,11 +239,11 @@ export function ActiveMatchesScreen({
                     <Text style={styles.candidateStatus}>{candidate.response.toUpperCase()}</Text>
                   </View>
                   <Pressable
-                    disabled={candidate.response !== "yes"}
-                    onPress={() => chooseCandidate(candidate.matchId)}
+                    disabled={candidate.response !== "yes" || Boolean(busyAction)}
+                    onPress={() => void runBusy(`pick-${candidate.matchId}`, () => chooseCandidate(candidate.matchId))}
                     style={[
                       styles.pickBtn,
-                      candidate.response !== "yes" && styles.pickBtnDisabled,
+                      (candidate.response !== "yes" || Boolean(busyAction)) && styles.pickBtnDisabled,
                       outTonight.selectedCandidateMatchId === candidate.matchId && styles.pickBtnActive
                     ]}
                   >
@@ -216,11 +264,13 @@ export function ActiveMatchesScreen({
                   {PLACE_OPTIONS.map((place) => (
                     <Pressable
                       key={place}
-                      style={[styles.placeBtn, meetupLocked && styles.actionBtnDisabled]}
-                      onPress={() => sendMeetOffer(place)}
-                      disabled={meetupLocked}
+                      style={({ pressed }) => [styles.placeBtn, meetupLocked && styles.actionBtnDisabled, pressed && styles.pressedBtn]}
+                      onPress={() => void runBusy(`offer-${place}`, () => sendMeetOffer(place))}
+                      disabled={meetupLocked || Boolean(busyAction)}
                     >
-                      <Text style={styles.placeBtnText}>{place}</Text>
+                      <Text style={styles.placeBtnText}>
+                        {busyAction === `offer-${place}` ? "Sending..." : place}
+                      </Text>
                     </Pressable>
                   ))}
                 </View>
@@ -234,11 +284,27 @@ export function ActiveMatchesScreen({
                   Waiting for recipient response: {fmtCountdown(outTonight.offerRespondBy)}
                 </Text>
                 <View style={styles.offerActions}>
-                  <Pressable style={[styles.actionBtn, styles.acceptBtn]} onPress={() => respondToMeetOffer(true)}>
-                    <Text style={styles.actionBtnText}>Accept</Text>
+                  <Pressable
+                    style={({ pressed }) => [styles.actionBtn, styles.acceptBtn, pressed && styles.pressedBtn]}
+                    onPress={() => void runBusy("offer-accept", () => respondToMeetOffer(true))}
+                    disabled={Boolean(busyAction)}
+                  >
+                    {busyAction === "offer-accept" ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text style={styles.actionBtnText}>Accept</Text>
+                    )}
                   </Pressable>
-                  <Pressable style={[styles.actionBtn, styles.declineBtn]} onPress={() => respondToMeetOffer(false)}>
-                    <Text style={styles.actionBtnText}>Decline</Text>
+                  <Pressable
+                    style={({ pressed }) => [styles.actionBtn, styles.declineBtn, pressed && styles.pressedBtn]}
+                    onPress={() => void runBusy("offer-decline", () => respondToMeetOffer(false))}
+                    disabled={Boolean(busyAction)}
+                  >
+                    {busyAction === "offer-decline" ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text style={styles.actionBtnText}>Decline</Text>
+                    )}
                   </Pressable>
                 </View>
               </View>
@@ -265,7 +331,7 @@ export function ActiveMatchesScreen({
         )}
       </View>
 
-      <Pressable style={styles.sectionCard} onPress={() => setShowOpenToMeeting((prev) => !prev)}>
+      <Pressable style={({ pressed }) => [styles.sectionCard, pressed && styles.pressedBtn]} onPress={() => setShowOpenToMeeting((prev) => !prev)}>
         <View style={styles.dropdownHeader}>
           <Text style={styles.sectionTitle}>Open to meeting ({readyMatches.length})</Text>
           <Text style={styles.dropdownCaret}>{showOpenToMeeting ? "▾" : "▸"}</Text>
@@ -542,5 +608,8 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontSize: 11,
     fontFamily: FONT_MEDIUM
+  },
+  pressedBtn: {
+    opacity: 0.78
   }
 });

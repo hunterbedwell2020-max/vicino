@@ -12,21 +12,24 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.vicino.app",
+      "bundleIdentifier": "com.hunterbedwell.vicino",
       "infoPlist": {
         "NSCameraUsageDescription": "Vicino uses your camera for profile and identity verification photos.",
         "NSPhotoLibraryUsageDescription": "Vicino uses your photo library for profile and identity verification photos.",
-        "NSUserTrackingUsageDescription": "Vicino does not use tracking across apps."
+        "NSUserTrackingUsageDescription": "Vicino does not use tracking across apps.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "package": "com.vicino.app",
+      "package": "com.hunterbedwell.vicino",
       "permissions": [
         "CAMERA",
         "READ_MEDIA_IMAGES",
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
     "web": {},
@@ -40,6 +43,11 @@
         }
       ],
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "2b911e7f-63f7-4f37-90cd-eb0ac21bf353"
+      }
+    }
   }
 }

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import {
   getAuthSession,
@@ -98,6 +98,7 @@ export function OnboardingScreen({
   const [selfieMime, setSelfieMime] = useState<string | undefined>(undefined);
   const [licenseBase64, setLicenseBase64] = useState("");
   const [licenseMime, setLicenseMime] = useState<string | undefined>(undefined);
+  const [pickingImage, setPickingImage] = useState<null | "selfie_camera" | "selfie_library" | "license_camera" | "license_library">(null);
 
   const auth = async () => {
     setLoading(true);
@@ -135,46 +136,52 @@ export function OnboardingScreen({
   };
 
   const pickImage = async (kind: "selfie" | "license", source: "camera" | "library") => {
+    const actionKey = `${kind}_${source}` as "selfie_camera" | "selfie_library" | "license_camera" | "license_library";
+    setPickingImage(actionKey);
     setError(null);
-    const permission =
-      source === "camera"
-        ? await ImagePicker.requestCameraPermissionsAsync()
-        : await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      setError(source === "camera" ? "Camera permission is required." : "Photo library permission is required.");
-      return;
-    }
+    try {
+      const permission =
+        source === "camera"
+          ? await ImagePicker.requestCameraPermissionsAsync()
+          : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setError(source === "camera" ? "Camera permission is required." : "Photo library permission is required.");
+        return;
+      }
 
-    const result =
-      source === "camera"
-        ? await ImagePicker.launchCameraAsync({
-            mediaTypes: "images",
-            quality: 0.8,
-            base64: true,
-            cameraType: kind === "selfie" ? ImagePicker.CameraType.front : ImagePicker.CameraType.back
-          })
-        : await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: "images",
-            quality: 0.8,
-            base64: true
-          });
-    if (result.canceled) {
-      return;
-    }
-    const asset = result.assets[0];
-    const uri = asset?.uri ?? "";
-    const b64 = asset?.base64 ?? "";
-    if (!uri || !b64) {
-      return;
-    }
-    if (kind === "selfie") {
-      setSelfieUri(uri);
-      setSelfieBase64(b64);
-      setSelfieMime(asset?.mimeType ?? "image/jpeg");
-    } else {
-      setLicenseUri(uri);
-      setLicenseBase64(b64);
-      setLicenseMime(asset?.mimeType ?? "image/jpeg");
+      const result =
+        source === "camera"
+          ? await ImagePicker.launchCameraAsync({
+              mediaTypes: "images",
+              quality: 0.8,
+              base64: true,
+              cameraType: kind === "selfie" ? ImagePicker.CameraType.front : ImagePicker.CameraType.back
+            })
+          : await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: "images",
+              quality: 0.8,
+              base64: true
+            });
+      if (result.canceled) {
+        return;
+      }
+      const asset = result.assets[0];
+      const uri = asset?.uri ?? "";
+      const b64 = asset?.base64 ?? "";
+      if (!uri || !b64) {
+        return;
+      }
+      if (kind === "selfie") {
+        setSelfieUri(uri);
+        setSelfieBase64(b64);
+        setSelfieMime(asset?.mimeType ?? "image/jpeg");
+      } else {
+        setLicenseUri(uri);
+        setLicenseBase64(b64);
+        setLicenseMime(asset?.mimeType ?? "image/jpeg");
+      }
+    } finally {
+      setPickingImage(null);
     }
   };
 
@@ -293,28 +300,69 @@ export function OnboardingScreen({
             </>
           ) : null}
           <Pressable style={styles.btn} onPress={() => void auth()} disabled={loading}>
-            <Text style={styles.btnText}>{mode === "signup" ? "Create Account" : "Log In"}</Text>
+            <View style={styles.btnContent}>
+              {loading ? <ActivityIndicator size="small" color="#fff" /> : null}
+              <Text style={styles.btnText}>
+                {loading ? (mode === "signup" ? "Creating..." : "Logging in...") : mode === "signup" ? "Create Account" : "Log In"}
+              </Text>
+            </View>
           </Pressable>
         </View>
       ) : (
         <View style={styles.card}>
           <Text style={styles.section}>Take Verification Photos</Text>
           <View style={styles.row}>
-            <Pressable style={styles.btnFlex} onPress={() => void pickImage("selfie", "camera")}>
-              <Text style={styles.btnText}>{selfieUri ? "Retake Selfie" : "Take Selfie"}</Text>
+            <Pressable
+              style={[styles.btnFlex, (loading || pickingImage !== null) && styles.btnDisabled]}
+              onPress={() => void pickImage("selfie", "camera")}
+              disabled={loading || pickingImage !== null}
+            >
+              <View style={styles.btnContent}>
+                {pickingImage === "selfie_camera" ? <ActivityIndicator size="small" color="#fff" /> : null}
+                <Text style={styles.btnText}>
+                  {pickingImage === "selfie_camera" ? "Opening..." : selfieUri ? "Retake Selfie" : "Take Selfie"}
+                </Text>
+              </View>
             </Pressable>
-            <Pressable style={styles.btnFlex} onPress={() => void pickImage("selfie", "library")}>
-              <Text style={styles.btnText}>From Library</Text>
+            <Pressable
+              style={[styles.btnFlex, (loading || pickingImage !== null) && styles.btnDisabled]}
+              onPress={() => void pickImage("selfie", "library")}
+              disabled={loading || pickingImage !== null}
+            >
+              <View style={styles.btnContent}>
+                {pickingImage === "selfie_library" ? <ActivityIndicator size="small" color="#fff" /> : null}
+                <Text style={styles.btnText}>{pickingImage === "selfie_library" ? "Opening..." : "From Library"}</Text>
+              </View>
             </Pressable>
           </View>
           <Text style={styles.helper}>{selfieUri || "No selfie captured yet."}</Text>
 
           <View style={styles.row}>
-            <Pressable style={styles.btnFlex} onPress={() => void pickImage("license", "camera")}>
-              <Text style={styles.btnText}>{licenseUri ? "Retake License Photo" : "Take Driver License Photo"}</Text>
+            <Pressable
+              style={[styles.btnFlex, (loading || pickingImage !== null) && styles.btnDisabled]}
+              onPress={() => void pickImage("license", "camera")}
+              disabled={loading || pickingImage !== null}
+            >
+              <View style={styles.btnContent}>
+                {pickingImage === "license_camera" ? <ActivityIndicator size="small" color="#fff" /> : null}
+                <Text style={styles.btnText}>
+                  {pickingImage === "license_camera"
+                    ? "Opening..."
+                    : licenseUri
+                      ? "Retake License Photo"
+                      : "Take Driver License Photo"}
+                </Text>
+              </View>
             </Pressable>
-            <Pressable style={styles.btnFlex} onPress={() => void pickImage("license", "library")}>
-              <Text style={styles.btnText}>From Library</Text>
+            <Pressable
+              style={[styles.btnFlex, (loading || pickingImage !== null) && styles.btnDisabled]}
+              onPress={() => void pickImage("license", "library")}
+              disabled={loading || pickingImage !== null}
+            >
+              <View style={styles.btnContent}>
+                {pickingImage === "license_library" ? <ActivityIndicator size="small" color="#fff" /> : null}
+                <Text style={styles.btnText}>{pickingImage === "license_library" ? "Opening..." : "From Library"}</Text>
+              </View>
             </Pressable>
           </View>
           <Text style={styles.helper}>{licenseUri || "No ID captured yet."}</Text>
@@ -327,11 +375,14 @@ export function OnboardingScreen({
             placeholderTextColor={theme.colors.muted}
           />
           <Pressable
-            style={styles.btn}
+            style={[styles.btn, (loading || !selfieUri || !licenseUri) && styles.btnDisabled]}
             onPress={() => void submitVerification()}
             disabled={loading || !selfieUri || !licenseUri}
           >
-            <Text style={styles.btnText}>Submit Verification</Text>
+            <View style={styles.btnContent}>
+              {loading ? <ActivityIndicator size="small" color="#fff" /> : null}
+              <Text style={styles.btnText}>{loading ? "Submitting..." : "Submit Verification"}</Text>
+            </View>
           </Pressable>
           <Pressable style={styles.ghostBtn} onPress={onSignedOut}>
             <Text style={styles.ghostText}>Sign Out</Text>
@@ -341,6 +392,23 @@ export function OnboardingScreen({
 
       {success ? <Text style={styles.success}>{success}</Text> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? (
+        <Pressable
+          style={styles.retryBtn}
+          onPress={() => {
+            if (!currentUser) {
+              void auth();
+              return;
+            }
+            if (selfieUri && licenseUri) {
+              void submitVerification();
+            }
+          }}
+          disabled={loading || (!!currentUser && (!selfieUri || !licenseUri))}
+        >
+          <Text style={styles.retryBtnText}>Retry</Text>
+        </Pressable>
+      ) : null}
 
       <Modal visible={showTerms} animationType="slide">
         <View style={styles.modalWrap}>
@@ -483,6 +551,14 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "700"
   },
+  btnContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8
+  },
+  btnDisabled: {
+    opacity: 0.7
+  },
   ghostBtn: {
     backgroundColor: "#EDE7F6",
     borderRadius: theme.radius.sm,
@@ -502,6 +578,17 @@ const styles = StyleSheet.create({
     color: "#B42318",
     fontWeight: "700",
     textAlign: "center"
+  },
+  retryBtn: {
+    alignSelf: "center",
+    backgroundColor: "#F3ECFB",
+    borderRadius: theme.radius.sm,
+    paddingHorizontal: 16,
+    paddingVertical: 8
+  },
+  retryBtnText: {
+    color: theme.colors.primary,
+    fontWeight: "700"
   },
   modalWrap: {
     flex: 1,

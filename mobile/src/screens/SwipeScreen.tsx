@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
   GestureResponderEvent,
@@ -285,6 +286,17 @@ export function SwipeScreen({
       <View style={styles.emptyWrap}>
         <Text style={styles.emptyTitle}>No more profiles right now</Text>
         <Text style={styles.emptySub}>Check back later for new people nearby.</Text>
+        <Pressable
+          style={({ pressed }) => [styles.emptyRefreshBtn, pressed && styles.pressedBtn]}
+          onPress={onRefresh}
+          disabled={refreshing}
+        >
+          {refreshing ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <Text style={styles.emptyRefreshText}>Refresh Profiles</Text>
+          )}
+        </Pressable>
       </View>
     );
   }
@@ -292,8 +304,16 @@ export function SwipeScreen({
   return (
     <View style={styles.wrap}>
       <View style={styles.refreshRow}>
-        <Pressable style={styles.refreshBtn} onPress={onRefresh} disabled={refreshing}>
-          <Text style={styles.refreshBtnText}>{refreshing ? "Refreshing..." : "Refresh profiles"}</Text>
+        <Pressable
+          style={({ pressed }) => [styles.refreshBtn, pressed && styles.pressedBtn]}
+          onPress={onRefresh}
+          disabled={refreshing}
+        >
+          {refreshing ? (
+            <ActivityIndicator color={theme.colors.primary} size="small" />
+          ) : (
+            <Text style={styles.refreshBtnText}>Refresh profiles</Text>
+          )}
         </Pressable>
       </View>
       {swipeError ? (
@@ -394,7 +414,7 @@ export function SwipeScreen({
             </View>
 
             <Pressable
-              style={styles.reportBtn}
+              style={({ pressed }) => [styles.reportBtn, pressed && styles.pressedBtn]}
               onPress={() => {
                 if (card?.id) {
                   onReport?.(card.id);
@@ -543,7 +563,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.card,
     borderRadius: theme.radius.lg,
     padding: 20,
-    gap: 8
+    gap: 10
   },
   emptyTitle: {
     fontSize: 20,
@@ -554,6 +574,22 @@ const styles = StyleSheet.create({
   emptySub: {
     color: theme.colors.muted,
     fontFamily: FONT_MEDIUM
+  },
+  emptyRefreshBtn: {
+    marginTop: 6,
+    alignSelf: "flex-start",
+    minWidth: 148,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.colors.primary,
+    borderRadius: theme.radius.sm,
+    paddingHorizontal: 14,
+    paddingVertical: 10
+  },
+  emptyRefreshText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontFamily: FONT_REGULAR
   },
 
   modalRoot: {
@@ -669,5 +705,8 @@ const styles = StyleSheet.create({
     color: "#B42318",
     fontWeight: "700",
     fontFamily: FONT_REGULAR
+  },
+  pressedBtn: {
+    opacity: 0.75
   }
 });

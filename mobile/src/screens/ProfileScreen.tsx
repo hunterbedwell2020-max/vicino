@@ -130,6 +130,9 @@ export function ProfileScreen({
   const dragPosition = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const dragScale = useRef(new Animated.Value(1)).current;
   const windowHeight = Dimensions.get("window").height;
+  const ageRangeTrackRef = useRef<View | null>(null);
+  const ageRangeTrackLeftRef = useRef(0);
+  const [ageRangeTrackWidth, setAgeRangeTrackWidth] = useState(0);
 
   const verificationLabel = useMemo(() => {
     if (!user) {
@@ -137,6 +140,67 @@ export function ProfileScreen({
     }
     return user.verified ? "Verified" : "Not verified";
   }, [user]);
+
+  const clampAge = (value: number) => Math.max(18, Math.min(99, Math.round(value)));
+  const ageRangeSpan = 99 - 18;
+  const minThumbLeft = ageRangeTrackWidth > 0 ? ((preferredAgeMin - 18) / ageRangeSpan) * ageRangeTrackWidth : 0;
+  const maxThumbLeft = ageRangeTrackWidth > 0 ? ((preferredAgeMax - 18) / ageRangeSpan) * ageRangeTrackWidth : 0;
+
+  const updateAgeTrackMetrics = () => {
+    ageRangeTrackRef.current?.measureInWindow((x, _y, width) => {
+      ageRangeTrackLeftRef.current = x;
+      if (width > 0) {
+        setAgeRangeTrackWidth(width);
+      }
+    });
+  };
+
+  const setAgeFromTrackPosition = (pageX: number, thumb: "min" | "max") => {
+    const width = ageRangeTrackWidth;
+    if (width <= 0) {
+      return;
+    }
+    const relative = Math.max(0, Math.min(width, pageX - ageRangeTrackLeftRef.current));
+    const rawAge = 18 + (relative / width) * ageRangeSpan;
+    const nextAge = clampAge(rawAge);
+    if (thumb === "min") {
+      setPreferredAgeMin(Math.min(nextAge, preferredAgeMax));
+    } else {
+      setPreferredAgeMax(Math.max(nextAge, preferredAgeMin));
+    }
+  };
+
+  const minAgeThumbResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: (evt) => {
+          updateAgeTrackMetrics();
+          setAgeFromTrackPosition(evt.nativeEvent.pageX, "min");
+        },
+        onPanResponderMove: (evt) => {
+          setAgeFromTrackPosition(evt.nativeEvent.pageX, "min");
+        }
+      }),
+    [ageRangeTrackWidth, preferredAgeMax]
+  );
+
+  const maxAgeThumbResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: (evt) => {
+          updateAgeTrackMetrics();
+          setAgeFromTrackPosition(evt.nativeEvent.pageX, "max");
+        },
+        onPanResponderMove: (evt) => {
+          setAgeFromTrackPosition(evt.nativeEvent.pageX, "max");
+        }
+      }),
+    [ageRangeTrackWidth, preferredAgeMin]
+  );
 
   const loadProfile = async () => {
     setError(null);
@@ -718,44 +782,65 @@ export function ProfileScreen({
         />
 
         <Text style={styles.sectionTitle}>Preferred Age Range</Text>
-        <Text style={styles.item}>
-          {preferredAgeMin} - {preferredAgeMax}
-        </Text>
-        <View style={styles.sliderWrap}>
-          <Text style={styles.sliderCaption}>Minimum Age</Text>
-          <Slider
-            value={preferredAgeMin}
-            minimumValue={18}
-            maximumValue={99}
-            step={1}
-            minimumTrackTintColor={theme.colors.primary}
-            maximumTrackTintColor="#D8C6ED"
-            thumbTintColor={theme.colors.primary}
-            onValueChange={(value: number) => {
-              const next = Math.round(value);
-              setPreferredAgeMin(next);
-              if (next > preferredAgeMax) {
-                setPreferredAgeMax(next);
-              }
-            }}
-          />
-          <Text style={styles.sliderCaption}>Maximum Age</Text>
-          <Slider
-            value={preferredAgeMax}
-            minimumValue={18}
-            maximumValue={99}
-            step={1}
-            minimumTrackTintColor={theme.colors.primary}
-            maximumTrackTintColor="#D8C6ED"
-            thumbTintColor={theme.colors.primary}
-            onValueChange={(value: number) => {
-              const next = Math.round(value);
-              setPreferredAgeMax(next);
-              if (next < preferredAgeMin) {
-                setPreferredAgeMin(next);
-              }
-            }}
-          />
+        <Text style={styles.item}>{preferredAgeMin} - {preferredAgeMax}</Text>
+        <View style={styles.ageRangeInputs}>
+          <View style={styles.ageRangeInputWrap}>
+            <Text style={styles.sliderCaption}>Min</Text>
+            <TextInput
+              style={styles.ageRangeInput}
+              value={String(preferredAgeMin)}
+              onChangeText={(value) => {
+                const numeric = clampAge(Number(value.replace(/[^0-9]/g, "").slice(0, 2) || "18"));
+                setPreferredAgeMin(Math.min(numeric, preferredAgeMax));
+              }}
+              keyboardType="number-pad"
+              placeholder="18"
+              placeholderTextColor={theme.colors.muted}
+            />
+          </View>
+          <View style={styles.ageRangeInputWrap}>
+            <Text style={styles.sliderCaption}>Max</Text>
+            <TextInput
+              style={styles.ageRangeInput}
+              value={String(preferredAgeMax)}
+              onChangeText={(value) => {
+                const numeric = clampAge(Number(value.replace(/[^0-9]/g, "").slice(0, 2) || "99"));
+                setPreferredAgeMax(Math.max(numeric, preferredAgeMin));
+              }}
+              keyboardType="number-pad"
+              placeholder="99"
+              placeholderTextColor={theme.colors.muted}
+            />
+          </View>
+        </View>
+        <View style={styles.ageRangeSliderWrap}>
+          <View
+            ref={ageRangeTrackRef}
+            style={styles.ageRangeTrack}
+            onLayout={() => updateAgeTrackMetrics()}
+          >
+            <View
+              style={[
+                styles.ageRangeSelectedTrack,
+                {
+                  left: minThumbLeft,
+                  width: Math.max(maxThumbLeft - minThumbLeft, 0)
+                }
+              ]}
+            />
+            <View
+              style={[styles.ageRangeThumb, { left: Math.max(minThumbLeft - 14, -14) }]}
+              {...minAgeThumbResponder.panHandlers}
+            />
+            <View
+              style={[styles.ageRangeThumb, { left: Math.max(maxThumbLeft - 14, -14) }]}
+              {...maxAgeThumbResponder.panHandlers}
+            />
+          </View>
+          <View style={styles.ageRangeLabels}>
+            <Text style={styles.ageRangeLabel}>18</Text>
+            <Text style={styles.ageRangeLabel}>99+</Text>
+          </View>
         </View>
 
         <Text style={styles.sectionTitle}>Profile Photo</Text>
@@ -1422,6 +1507,72 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.sm,
     paddingHorizontal: 10,
     paddingVertical: 6
+  },
+  ageRangeInputs: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 4,
+    marginBottom: 10
+  },
+  ageRangeInputWrap: {
+    flex: 1,
+    gap: 6
+  },
+  ageRangeInput: {
+    backgroundColor: "#F6F1FB",
+    borderRadius: theme.radius.sm,
+    borderWidth: 1,
+    borderColor: "#E2D4F3",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: theme.colors.text,
+    fontFamily: FONT_MEDIUM
+  },
+  ageRangeSliderWrap: {
+    backgroundColor: "#F6F1FB",
+    borderRadius: theme.radius.sm,
+    paddingHorizontal: 14,
+    paddingTop: 18,
+    paddingBottom: 12
+  },
+  ageRangeTrack: {
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: "#D8C6ED",
+    position: "relative",
+    marginHorizontal: 2
+  },
+  ageRangeSelectedTrack: {
+    position: "absolute",
+    top: 0,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: theme.colors.primary
+  },
+  ageRangeThumb: {
+    position: "absolute",
+    top: -11,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 3,
+    borderColor: theme.colors.primary,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3
+  },
+  ageRangeLabels: {
+    marginTop: 14,
+    flexDirection: "row",
+    justifyContent: "space-between"
+  },
+  ageRangeLabel: {
+    color: theme.colors.muted,
+    fontSize: 12,
+    fontFamily: FONT_MEDIUM
   },
   sliderCaption: {
     color: theme.colors.muted,
