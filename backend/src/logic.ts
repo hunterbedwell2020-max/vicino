@@ -277,6 +277,32 @@ function isPublicPlaceId(placeId: string) {
   return placeId.startsWith("poi_");
 }
 
+function sortPairUsers(userAId: string, userBId: string) {
+  return userAId < userBId ? [userAId, userBId] : [userBId, userAId];
+}
+
+async function assertPairNotClosed(db: Queryable, userAId: string, userBId: string) {
+  const [lowId, highId] = sortPairUsers(userAId, userBId);
+  const { rows } = await db.query(
+    `SELECT
+       EXISTS(
+         SELECT 1
+         FROM user_blocks
+         WHERE (blocker_user_id = $1 AND blocked_user_id = $2)
+            OR (blocker_user_id = $2 AND blocked_user_id = $1)
+       ) AS blocked,
+       EXISTS(
+         SELECT 1
+         FROM pair_closures
+         WHERE user_low_id = $3 AND user_high_id = $4
+       ) AS closed`,
+    [userAId, userBId, lowId, highId]
+  );
+  if (Boolean(rows[0]?.blocked) || Boolean(rows[0]?.closed)) {
+    throw new Error("This profile is no longer available.");
+  }
+}
+
 export async function listUsers() {
   const { rows } = await pool.query(
     `SELECT id, first_name, last_name, username, is_admin, email, phone, is_banned, age, gender,
@@ -730,6 +756,16 @@ export async function listDiscoveryProfiles(userId: string) {
           SELECT 1 FROM matches m
           WHERE (m.user_a_id = $1 AND m.user_b_id = u.id)
              OR (m.user_a_id = u.id AND m.user_b_id = $1)
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM user_blocks ub
+          WHERE (ub.blocker_user_id = $1 AND ub.blocked_user_id = u.id)
+             OR (ub.blocker_user_id = u.id AND ub.blocked_user_id = $1)
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM pair_closures pc
+          WHERE pc.user_low_id = LEAST($1, u.id)
+            AND pc.user_high_id = GREATEST($1, u.id)
         )
         AND (
           3959 * ACOS(
@@ -1238,6 +1274,7 @@ export async function swipe(fromUserId: string, toUserId: string, decision: Swip
     await client.query("BEGIN");
     const pairKey = [fromUserId, toUserId].sort().join(":");
     await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [pairKey]);
+    await assertPairNotClosed(client, fromUserId, toUserId);
     const planLimits = getPlanLimits(getPlanTier(fromUser as Record<string, unknown>));
     if (planLimits.maxDailySwipes !== null) {
       const swipeWindowRes = await client.query(
@@ -1381,6 +1418,7 @@ export async function sendMessage(matchId: string, senderUserId: string, body: s
       throw new Error("Match not found");
     }
     requireMatchMember(match, senderUserId);
+    await assertPairNotClosed(client, match.user_a_id, match.user_b_id);
 
     const countsRes = await client.query(
       `SELECT sender_user_id, COUNT(*)::int AS count
@@ -1442,6 +1480,102 @@ export async function sendMessage(matchId: string, senderUserId: string, body: s
       });
     })().catch(() => null);
     return result;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function unmatchPair(matchId: string, actorUserId: string) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const matchRes = await client.query(
+      `SELECT id, user_a_id, user_b_id
+       FROM matches
+       WHERE id = $1
+       FOR UPDATE`,
+      [matchId]
+    );
+    const match = matchRes.rows[0] as { id: string; user_a_id: string; user_b_id: string } | undefined;
+    if (!match) {
+      throw new Error("Match not found");
+    }
+    requireMatchMember(
+      {
+        id: match.id,
+        user_a_id: match.user_a_id,
+        user_b_id: match.user_b_id,
+        created_at: "",
+        coordination_ends_at: null
+      },
+      actorUserId
+    );
+    const [lowId, highId] = sortPairUsers(match.user_a_id, match.user_b_id);
+    await client.query(
+      `INSERT INTO pair_closures (user_low_id, user_high_id, reason, actor_user_id, created_at)
+       VALUES ($1, $2, 'unmatched', $3, NOW())
+       ON CONFLICT (user_low_id, user_high_id)
+       DO UPDATE SET reason = EXCLUDED.reason, actor_user_id = EXCLUDED.actor_user_id, created_at = NOW()`,
+      [lowId, highId, actorUserId]
+    );
+    await client.query(`DELETE FROM matches WHERE id = $1`, [matchId]);
+    await client.query("COMMIT");
+    return { ok: true as const };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function blockPair(matchId: string, actorUserId: string) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const matchRes = await client.query(
+      `SELECT id, user_a_id, user_b_id
+       FROM matches
+       WHERE id = $1
+       FOR UPDATE`,
+      [matchId]
+    );
+    const match = matchRes.rows[0] as { id: string; user_a_id: string; user_b_id: string } | undefined;
+    if (!match) {
+      throw new Error("Match not found");
+    }
+    requireMatchMember(
+      {
+        id: match.id,
+        user_a_id: match.user_a_id,
+        user_b_id: match.user_b_id,
+        created_at: "",
+        coordination_ends_at: null
+      },
+      actorUserId
+    );
+    const otherUserId = match.user_a_id === actorUserId ? match.user_b_id : match.user_a_id;
+    const [lowId, highId] = sortPairUsers(match.user_a_id, match.user_b_id);
+
+    await client.query(
+      `INSERT INTO user_blocks (blocker_user_id, blocked_user_id, created_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (blocker_user_id, blocked_user_id) DO NOTHING`,
+      [actorUserId, otherUserId]
+    );
+    await client.query(
+      `INSERT INTO pair_closures (user_low_id, user_high_id, reason, actor_user_id, created_at)
+       VALUES ($1, $2, 'blocked', $3, NOW())
+       ON CONFLICT (user_low_id, user_high_id)
+       DO UPDATE SET reason = EXCLUDED.reason, actor_user_id = EXCLUDED.actor_user_id, created_at = NOW()`,
+      [lowId, highId, actorUserId]
+    );
+    await client.query(`DELETE FROM matches WHERE id = $1`, [matchId]);
+    await client.query("COMMIT");
+    return { ok: true as const };
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;

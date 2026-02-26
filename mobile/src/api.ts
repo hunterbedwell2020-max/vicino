@@ -385,6 +385,20 @@ export function postMeetDecision(matchId: string, userId: string, decision: "yes
   });
 }
 
+export function postUnmatch(matchId: string, userId: string) {
+  return request<{ ok: true }>(`/matches/${matchId}/unmatch`, {
+    method: "POST",
+    body: JSON.stringify({ userId })
+  });
+}
+
+export function postBlock(matchId: string, userId: string) {
+  return request<{ ok: true }>(`/matches/${matchId}/block`, {
+    method: "POST",
+    body: JSON.stringify({ userId })
+  });
+}
+
 export function postAvailabilityStart(initiatorUserId: string) {
   return request<{ session: AvailabilityState["session"]; candidates: AvailabilityCandidate[] }>(
     "/availability/start",

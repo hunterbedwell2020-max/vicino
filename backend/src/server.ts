@@ -10,6 +10,7 @@ import {
   assertVerifiedUser,
   assertAdminSession,
   banUserByAdmin,
+  blockPair,
   closeAvailability,
   createUserReport,
   createMeetupOffer,
@@ -43,6 +44,7 @@ import {
   submitVerification,
   unbanUserByAdmin,
   trackProductEvent,
+  unmatchPair,
   updateUserProfile,
   updateUserDistancePreference,
   updateUserLocation,
@@ -816,6 +818,34 @@ app.post("/meet-decisions", userActionRateLimit, async (req, res) => {
     await assertVerifiedUser(parsed.data.userId);
     const result = await setMeetDecision(parsed.data.matchId, parsed.data.userId, parsed.data.decision);
     return res.json(result);
+  } catch (err) {
+    return res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/matches/:matchId/unmatch", userActionRateLimit, async (req, res) => {
+  const schema = z.object({ userId: z.string() });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+  try {
+    await assertVerifiedUser(parsed.data.userId);
+    return res.json(await unmatchPair(String(req.params.matchId), parsed.data.userId));
+  } catch (err) {
+    return res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/matches/:matchId/block", userActionRateLimit, async (req, res) => {
+  const schema = z.object({ userId: z.string() });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+  try {
+    await assertVerifiedUser(parsed.data.userId);
+    return res.json(await blockPair(String(req.params.matchId), parsed.data.userId));
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
   }

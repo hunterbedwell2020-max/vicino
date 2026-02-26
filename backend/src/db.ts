@@ -254,6 +254,24 @@ export async function initDb() {
       CHECK (user_a_id <> user_b_id)
     );
 
+    CREATE TABLE IF NOT EXISTS user_blocks (
+      blocker_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      blocked_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (blocker_user_id, blocked_user_id),
+      CHECK (blocker_user_id <> blocked_user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS pair_closures (
+      user_low_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      user_high_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reason TEXT NOT NULL CHECK (reason IN ('unmatched', 'blocked')),
+      actor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_low_id, user_high_id),
+      CHECK (user_low_id <> user_high_id)
+    );
+
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY,
       match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,

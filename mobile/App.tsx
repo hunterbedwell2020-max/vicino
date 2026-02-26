@@ -391,7 +391,7 @@ function VicinoApp() {
         <View style={[styles.header, styles.headerCompact]} {...headerPullResponder.panHandlers}>
           <View style={styles.headerTopRow}>
             <Image
-              source={require("./assets/vicinus-header.png")}
+              source={require("./assets/vicinus-trans-logo.png")}
               style={[styles.headerLogo, styles.headerLogoCompact]}
               resizeMode="contain"
             />
@@ -463,6 +463,8 @@ function VicinoApp() {
                   sendAutoReply={state.sendAutoReply}
                   messageCapReached={state.messageCapReached}
                   setMeetDecision={state.setMeetDecision}
+                  blockMatch={state.block}
+                  unmatch={state.unmatch}
                   bothMeetYes={state.bothMeetYes}
                   showDevTools={showDevTools}
                   refreshing={refreshing}
@@ -773,12 +775,13 @@ const styles = StyleSheet.create({
   },
   headerLogo: {
     flex: 1,
-    height: 100,
-    marginRight: 2,
-    marginLeft: -113
+    height: 110,
+    marginRight: 0,
+    marginLeft: -136,
+    transform: [{ scale: 2 }]
   },
   headerLogoCompact: {
-    height: 76
+    height: 84
   },
   profileBtn: {
     width: 40,

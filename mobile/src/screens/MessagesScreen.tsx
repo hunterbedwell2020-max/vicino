@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -27,6 +28,8 @@ export function MessagesScreen({
   sendAutoReply,
   messageCapReached,
   setMeetDecision,
+  blockMatch,
+  unmatch,
   bothMeetYes,
   showDevTools = false,
   refreshing = false,
@@ -45,6 +48,8 @@ export function MessagesScreen({
   sendAutoReply: (matchId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   messageCapReached: (match: MatchPreview) => boolean;
   setMeetDecision: (matchId: string, user: "me" | "them", decision: MeetDecision) => Promise<void>;
+  blockMatch: (matchId: string) => Promise<void>;
+  unmatch: (matchId: string) => Promise<void>;
   bothMeetYes: (match: MatchPreview) => boolean;
   showDevTools?: boolean;
   refreshing?: boolean;
@@ -54,6 +59,9 @@ export function MessagesScreen({
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [meetPromptOpen, setMeetPromptOpen] = useState(false);
+  const [decisionBusyKey, setDecisionBusyKey] = useState<string | null>(null);
+  const [actionMenuOpen, setActionMenuOpen] = useState(false);
+  const [menuBusy, setMenuBusy] = useState<string | null>(null);
   const listRef = useRef<FlatList<{ id: string; sender: "me" | "them"; body: string }>>(null);
 
   const capReached = activeMatch ? messageCapReached(activeMatch) : false;
@@ -116,16 +124,30 @@ export function MessagesScreen({
               <Text style={styles.promptLabel}>Your answer:</Text>
               <View style={styles.promptActions}>
                 <Pressable
-                  style={[styles.promptBtn, activeMatch.meetDecisionByMe === "yes" && styles.promptBtnYes]}
-                  onPress={() => setMeetDecision(activeMatch.id, "me", "yes")}
+                  style={({ pressed }) => [
+                    styles.promptBtn,
+                    activeMatch.meetDecisionByMe === "yes" && styles.promptBtnYes,
+                    pressed && styles.pressedBtn
+                  ]}
+                  disabled={decisionBusyKey !== null}
+                  onPress={() => void submitMeetDecision(activeMatch.id, "me", "yes")}
                 >
-                  <Text style={styles.promptBtnText}>Yes</Text>
+                  <Text style={styles.promptBtnText}>
+                    {decisionBusyKey === `${activeMatch.id}:me:yes` ? "..." : "Yes"}
+                  </Text>
                 </Pressable>
                 <Pressable
-                  style={[styles.promptBtn, activeMatch.meetDecisionByMe === "no" && styles.promptBtnNo]}
-                  onPress={() => setMeetDecision(activeMatch.id, "me", "no")}
+                  style={({ pressed }) => [
+                    styles.promptBtn,
+                    activeMatch.meetDecisionByMe === "no" && styles.promptBtnNo,
+                    pressed && styles.pressedBtn
+                  ]}
+                  disabled={decisionBusyKey !== null}
+                  onPress={() => void submitMeetDecision(activeMatch.id, "me", "no")}
                 >
-                  <Text style={styles.promptBtnText}>No</Text>
+                  <Text style={styles.promptBtnText}>
+                    {decisionBusyKey === `${activeMatch.id}:me:no` ? "..." : "No"}
+                  </Text>
                 </Pressable>
               </View>
             </View>
@@ -135,16 +157,30 @@ export function MessagesScreen({
                 <Text style={styles.promptLabel}>Simulate their answer:</Text>
                 <View style={styles.promptActions}>
                   <Pressable
-                    style={[styles.promptBtn, activeMatch.meetDecisionByThem === "yes" && styles.promptBtnYes]}
-                    onPress={() => setMeetDecision(activeMatch.id, "them", "yes")}
+                    style={({ pressed }) => [
+                      styles.promptBtn,
+                      activeMatch.meetDecisionByThem === "yes" && styles.promptBtnYes,
+                      pressed && styles.pressedBtn
+                    ]}
+                    disabled={decisionBusyKey !== null}
+                    onPress={() => void submitMeetDecision(activeMatch.id, "them", "yes")}
                   >
-                    <Text style={styles.promptBtnText}>Yes</Text>
+                    <Text style={styles.promptBtnText}>
+                      {decisionBusyKey === `${activeMatch.id}:them:yes` ? "..." : "Yes"}
+                    </Text>
                   </Pressable>
                   <Pressable
-                    style={[styles.promptBtn, activeMatch.meetDecisionByThem === "no" && styles.promptBtnNo]}
-                    onPress={() => setMeetDecision(activeMatch.id, "them", "no")}
+                    style={({ pressed }) => [
+                      styles.promptBtn,
+                      activeMatch.meetDecisionByThem === "no" && styles.promptBtnNo,
+                      pressed && styles.pressedBtn
+                    ]}
+                    disabled={decisionBusyKey !== null}
+                    onPress={() => void submitMeetDecision(activeMatch.id, "them", "no")}
                   >
-                    <Text style={styles.promptBtnText}>No</Text>
+                    <Text style={styles.promptBtnText}>
+                      {decisionBusyKey === `${activeMatch.id}:them:no` ? "..." : "No"}
+                    </Text>
                   </Pressable>
                 </View>
               </View>
@@ -159,11 +195,48 @@ export function MessagesScreen({
         )}
       </View>
     );
-  }, [activeMatch, capReached, bothMeetYes, setMeetDecision, showDevTools, meetPromptOpen]);
+  }, [activeMatch, capReached, bothMeetYes, setMeetDecision, showDevTools, meetPromptOpen, decisionBusyKey]);
 
   const closeChatWithGuard = () => {
     closeChat();
   };
+
+  useEffect(() => {
+    if (!activeMatch) {
+      return;
+    }
+    if (capReached && !bothMeetYes(activeMatch)) {
+      setMeetPromptOpen(true);
+    }
+  }, [activeMatch?.id, activeMatch?.messagesUsedByMe, activeMatch?.messagesUsedByThem, capReached, bothMeetYes]);
+
+  useEffect(() => {
+    setActionMenuOpen(false);
+  }, [activeMatch?.id]);
+
+  async function submitMeetDecision(
+    matchId: string,
+    user: "me" | "them",
+    decision: MeetDecision
+  ) {
+    const key = `${matchId}:${user}:${decision}`;
+    setDecisionBusyKey(key);
+    try {
+      await setMeetDecision(matchId, user, decision);
+    } finally {
+      setDecisionBusyKey(null);
+    }
+  }
+
+  async function runMenuAction(action: "block" | "unmatch" | "meet", task: () => Promise<void> | void) {
+    setMenuBusy(action);
+    try {
+      await Promise.resolve(task());
+      setActionMenuOpen(false);
+    } finally {
+      setMenuBusy(null);
+    }
+  }
 
   useEffect(() => {
     if (!activeMatch) {
@@ -259,12 +332,20 @@ export function MessagesScreen({
     <KeyboardAvoidingView
       style={styles.chatWrap}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 88 : 0}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 104 : 0}
     >
       <View style={styles.chatHeader}>
-        <Pressable onPress={closeChatWithGuard}>
-          <Text style={styles.back}>{"< Back"}</Text>
-        </Pressable>
+        <View style={styles.chatTopRow}>
+          <Pressable onPress={closeChatWithGuard}>
+            <Text style={styles.back}>{"< Back"}</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.moreBtn, pressed && styles.pressedBtn]}
+            onPress={() => setActionMenuOpen((prev) => !prev)}
+          >
+            <Text style={styles.moreBtnText}>...</Text>
+          </Pressable>
+        </View>
         <View style={styles.headerIdentity}>
           <Pressable onPress={() => openMatchProfile(activeMatch.id)}>
             {activeMatch.avatarUrl ? (
@@ -282,9 +363,44 @@ export function MessagesScreen({
         <Text style={styles.counts}>
           You {activeMatch.messagesUsedByMe}/30 | Them {activeMatch.messagesUsedByThem}/30
         </Text>
+        {actionMenuOpen ? (
+          <View style={styles.headerMenu}>
+            <Pressable
+              style={({ pressed }) => [styles.headerMenuItem, pressed && styles.pressedBtn]}
+              disabled={Boolean(menuBusy)}
+              onPress={() =>
+                void runMenuAction("meet", async () => {
+                  setMeetPromptOpen(true);
+                })
+              }
+            >
+              <Text style={styles.headerMenuItemText}>
+                {menuBusy === "meet" ? "Opening..." : "Open to meet"}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.headerMenuItem, pressed && styles.pressedBtn]}
+              disabled={Boolean(menuBusy)}
+              onPress={() => void runMenuAction("unmatch", () => unmatch(activeMatch.id))}
+            >
+              <Text style={styles.headerMenuItemText}>
+                {menuBusy === "unmatch" ? "Unmatching..." : "Unmatch"}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.headerMenuItem, pressed && styles.pressedBtn]}
+              disabled={Boolean(menuBusy)}
+              onPress={() => void runMenuAction("block", () => blockMatch(activeMatch.id))}
+            >
+              <Text style={[styles.headerMenuItemText, styles.headerMenuDanger]}>
+                {menuBusy === "block" ? "Blocking..." : "Block"}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
       </View>
 
-      {meetSummary}
+      {meetPromptOpen || capReached ? meetSummary : null}
 
       <FlatList
         ref={listRef}
@@ -316,18 +432,30 @@ export function MessagesScreen({
               returnKeyType="send"
               onSubmitEditing={() => void sendMine()}
             />
-            <Pressable style={[styles.sendFab, sending && styles.sendFabDisabled]} onPress={() => void sendMine()} disabled={sending}>
-              <Text style={styles.sendFabIcon}>{sending ? "..." : "✈"}</Text>
+            <Pressable
+              style={({ pressed }) => [styles.sendFab, sending && styles.sendFabDisabled, pressed && styles.pressedBtn]}
+              onPress={() => void sendMine()}
+              disabled={sending}
+            >
+              {sending ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.sendFabIcon}>✈</Text>
+              )}
             </Pressable>
           </View>
           <View style={styles.composeActions}>
             {error ? (
-              <Pressable style={[styles.composeBtn, styles.retryBtn]} onPress={() => void sendMine()} disabled={sending}>
+              <Pressable
+                style={({ pressed }) => [styles.composeBtn, styles.retryBtn, pressed && styles.pressedBtn]}
+                onPress={() => void sendMine()}
+                disabled={sending}
+              >
                 <Text style={[styles.composeBtnText, styles.retryBtnText]}>Retry Send</Text>
               </Pressable>
             ) : null}
             {showDevTools ? (
-              <Pressable style={[styles.composeBtn, styles.replyBtn]} onPress={sendTheirs}>
+              <Pressable style={({ pressed }) => [styles.composeBtn, styles.replyBtn, pressed && styles.pressedBtn]} onPress={sendTheirs}>
                 <Text style={styles.composeBtnText}>Sim Reply</Text>
               </Pressable>
             ) : null}
@@ -421,7 +549,53 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     gap: 4
   },
+  chatTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between"
+  },
   back: { color: theme.colors.primary, fontWeight: "700", fontFamily: FONT_REGULAR },
+  moreBtn: {
+    minWidth: 36,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: "#F2ECF8",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 8
+  },
+  moreBtnText: {
+    color: theme.colors.primary,
+    fontSize: 18,
+    fontWeight: "700",
+    lineHeight: 18,
+    marginTop: -4,
+    fontFamily: FONT_REGULAR
+  },
+  headerMenu: {
+    marginTop: 8,
+    alignSelf: "flex-end",
+    width: 168,
+    backgroundColor: "#FFFFFF",
+    borderRadius: theme.radius.sm,
+    borderWidth: 1,
+    borderColor: "#EADCF8",
+    overflow: "hidden"
+  },
+  headerMenuItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1E8FA"
+  },
+  headerMenuItemText: {
+    color: theme.colors.text,
+    fontSize: 14,
+    fontFamily: FONT_MEDIUM
+  },
+  headerMenuDanger: {
+    color: theme.colors.danger
+  },
   headerIdentity: {
     flexDirection: "row",
     gap: 8,
@@ -569,6 +743,9 @@ const styles = StyleSheet.create({
   replyBtn: { backgroundColor: theme.colors.primaryLight },
   composeBtnText: { color: "#fff", fontWeight: "700", fontFamily: FONT_REGULAR },
   error: { color: theme.colors.danger, fontWeight: "600", fontFamily: FONT_MEDIUM },
+  pressedBtn: {
+    opacity: 0.78
+  },
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.42)",

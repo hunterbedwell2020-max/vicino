@@ -9,11 +9,13 @@ import {
   postAvailabilityClose,
   postAvailabilityRespondInterest,
   postAvailabilityStart,
+  postBlock,
   postMeetDecision,
   postMessage,
   postOffer,
   postOfferRespond,
   postSwipe,
+  postUnmatch,
   postAnalyticsEvent,
   type ApiMatch,
   type ApiOffer,
@@ -443,6 +445,22 @@ export function useVicinoState(currentUserId: string | null) {
     return sendMessage(matchId, "them", text);
   };
 
+  const removeMatchLocally = (matchId: string) => {
+    setMatches((prev) => prev.filter((match) => match.id !== matchId));
+    setAcknowledgedMatchIds((prev) => {
+      const next = new Set(prev);
+      next.delete(matchId);
+      return next;
+    });
+    setOutTonight((prev) => ({
+      ...prev,
+      candidates: prev.candidates.filter((candidate) => candidate.matchId !== matchId),
+      incomingRequests: prev.incomingRequests.filter((request) => request.matchId !== matchId),
+      selectedCandidateMatchId: prev.selectedCandidateMatchId === matchId ? null : prev.selectedCandidateMatchId
+    }));
+    setActiveChatMatchId((prev) => (prev === matchId ? null : prev));
+  };
+
   const setMeetDecision = async (matchId: string, user: "me" | "them", decision: MeetDecision) => {
     const match = matches.find((m) => m.id === matchId);
     if (!match) {
@@ -470,6 +488,24 @@ export function useVicinoState(currentUserId: string | null) {
           : { ...m, meetDecisionByThem: decision };
       })
     );
+  };
+
+  const unmatch = async (matchId: string) => {
+    if (!currentUserId) {
+      return;
+    }
+    await postUnmatch(matchId, currentUserId);
+    removeMatchLocally(matchId);
+    await refreshDiscoveryOnly().catch(() => null);
+  };
+
+  const block = async (matchId: string) => {
+    if (!currentUserId) {
+      return;
+    }
+    await postBlock(matchId, currentUserId);
+    removeMatchLocally(matchId);
+    await refreshDiscoveryOnly().catch(() => null);
   };
 
   const eligibleOutMatches = useMemo(
@@ -683,6 +719,8 @@ export function useVicinoState(currentUserId: string | null) {
     sendMessage,
     sendAutoReply,
     setMeetDecision,
+    unmatch,
+    block,
     bothMeetYes,
     startOutTonight,
     stopOutTonight,
