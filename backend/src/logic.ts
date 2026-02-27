@@ -1699,6 +1699,7 @@ export async function listIncomingAvailabilityForUser(userId: string) {
      JOIN availability_sessions s ON s.id = sc.session_id
      JOIN users u ON u.id = s.initiator_user_id
      WHERE sc.candidate_user_id = $1
+       AND sc.response = 'pending'
        AND s.active = TRUE
      ORDER BY sc.updated_at DESC`,
     [userId]

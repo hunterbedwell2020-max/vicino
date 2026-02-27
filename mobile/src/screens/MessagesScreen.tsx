@@ -4,6 +4,7 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   RefreshControl,
@@ -83,6 +84,11 @@ export function MessagesScreen({
       return date.toLocaleDateString([], { weekday: "short" });
     }
     return date.toLocaleDateString([], { month: "numeric", day: "numeric" });
+  };
+
+  const getFirstUrl = (value: string) => {
+    const match = value.match(/https?:\/\/\S+/i);
+    return match ? match[0] : null;
   };
 
   const sortedMatches = useMemo(() => {
@@ -346,6 +352,43 @@ export function MessagesScreen({
             <Text style={styles.moreBtnText}>...</Text>
           </Pressable>
         </View>
+        {actionMenuOpen ? (
+          <View style={styles.headerMenuOverlay}>
+            <View style={styles.headerMenu}>
+              <Pressable
+                style={({ pressed }) => [styles.headerMenuItem, pressed && styles.pressedBtn]}
+                disabled={Boolean(menuBusy)}
+                onPress={() =>
+                  void runMenuAction("meet", async () => {
+                    setMeetPromptOpen(true);
+                  })
+                }
+              >
+                <Text style={styles.headerMenuItemText}>
+                  {menuBusy === "meet" ? "Opening..." : "Open to meet"}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.headerMenuItem, pressed && styles.pressedBtn]}
+                disabled={Boolean(menuBusy)}
+                onPress={() => void runMenuAction("unmatch", () => unmatch(activeMatch.id))}
+              >
+                <Text style={styles.headerMenuItemText}>
+                  {menuBusy === "unmatch" ? "Unmatching..." : "Unmatch"}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.headerMenuItem, pressed && styles.pressedBtn]}
+                disabled={Boolean(menuBusy)}
+                onPress={() => void runMenuAction("block", () => blockMatch(activeMatch.id))}
+              >
+                <Text style={[styles.headerMenuItemText, styles.headerMenuDanger]}>
+                  {menuBusy === "block" ? "Blocking..." : "Block"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
         <View style={styles.headerIdentity}>
           <Pressable onPress={() => openMatchProfile(activeMatch.id)}>
             {activeMatch.avatarUrl ? (
@@ -363,41 +406,6 @@ export function MessagesScreen({
         <Text style={styles.counts}>
           You {activeMatch.messagesUsedByMe}/30 | Them {activeMatch.messagesUsedByThem}/30
         </Text>
-        {actionMenuOpen ? (
-          <View style={styles.headerMenu}>
-            <Pressable
-              style={({ pressed }) => [styles.headerMenuItem, pressed && styles.pressedBtn]}
-              disabled={Boolean(menuBusy)}
-              onPress={() =>
-                void runMenuAction("meet", async () => {
-                  setMeetPromptOpen(true);
-                })
-              }
-            >
-              <Text style={styles.headerMenuItemText}>
-                {menuBusy === "meet" ? "Opening..." : "Open to meet"}
-              </Text>
-            </Pressable>
-            <Pressable
-              style={({ pressed }) => [styles.headerMenuItem, pressed && styles.pressedBtn]}
-              disabled={Boolean(menuBusy)}
-              onPress={() => void runMenuAction("unmatch", () => unmatch(activeMatch.id))}
-            >
-              <Text style={styles.headerMenuItemText}>
-                {menuBusy === "unmatch" ? "Unmatching..." : "Unmatch"}
-              </Text>
-            </Pressable>
-            <Pressable
-              style={({ pressed }) => [styles.headerMenuItem, pressed && styles.pressedBtn]}
-              disabled={Boolean(menuBusy)}
-              onPress={() => void runMenuAction("block", () => blockMatch(activeMatch.id))}
-            >
-              <Text style={[styles.headerMenuItemText, styles.headerMenuDanger]}>
-                {menuBusy === "block" ? "Blocking..." : "Block"}
-              </Text>
-            </Pressable>
-          </View>
-        ) : null}
       </View>
 
       {meetPromptOpen || capReached ? meetSummary : null}
@@ -411,11 +419,31 @@ export function MessagesScreen({
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         keyboardShouldPersistTaps="handled"
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
-        renderItem={({ item }) => (
-          <View style={[styles.bubble, item.sender === "me" ? styles.myBubble : styles.theirBubble]}>
-            <Text style={[styles.bubbleText, item.sender === "me" && styles.myBubbleText]}>{item.body}</Text>
-          </View>
-        )}
+        renderItem={({ item }) => {
+          const url = getFirstUrl(item.body);
+          const bodyText = url ? item.body.replace(url, "").trim() : item.body;
+          return (
+            <View style={[styles.bubble, item.sender === "me" ? styles.myBubble : styles.theirBubble]}>
+              {bodyText ? (
+                <Text style={[styles.bubbleText, item.sender === "me" && styles.myBubbleText]}>{bodyText}</Text>
+              ) : null}
+              {url ? (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.mapBtn,
+                    item.sender === "me" ? styles.mapBtnMine : styles.mapBtnTheirs,
+                    pressed && styles.pressedBtn
+                  ]}
+                  onPress={() => {
+                    void Linking.openURL(url).catch(() => null);
+                  }}
+                >
+                  <Text style={[styles.mapBtnText, item.sender === "me" && styles.mapBtnTextMine]}>Open in Maps</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          );
+        }}
       />
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -547,7 +575,15 @@ const styles = StyleSheet.create({
     borderColor: "#EADCF8",
     paddingHorizontal: 12,
     paddingVertical: 10,
-    gap: 4
+    gap: 4,
+    position: "relative"
+  },
+  headerMenuOverlay: {
+    position: "absolute",
+    top: 44,
+    right: 10,
+    zIndex: 20,
+    elevation: 6
   },
   chatTopRow: {
     flexDirection: "row",
@@ -650,6 +686,27 @@ const styles = StyleSheet.create({
   },
   bubbleText: { color: theme.colors.text, fontFamily: FONT_MEDIUM },
   myBubbleText: { color: "#fff", fontFamily: FONT_MEDIUM },
+  mapBtn: {
+    marginTop: 8,
+    borderRadius: 8,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    alignSelf: "flex-start"
+  },
+  mapBtnMine: {
+    backgroundColor: "rgba(255,255,255,0.2)"
+  },
+  mapBtnTheirs: {
+    backgroundColor: "#D8C7EE"
+  },
+  mapBtnText: {
+    color: theme.colors.text,
+    fontFamily: FONT_REGULAR,
+    fontSize: 13
+  },
+  mapBtnTextMine: {
+    color: "#fff"
+  },
 
   promptCompactCard: {
     backgroundColor: theme.colors.card,

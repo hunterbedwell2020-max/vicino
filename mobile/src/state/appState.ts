@@ -146,6 +146,7 @@ export function useVicinoState(currentUserId: string | null) {
 
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const outTonightSyncRef = useRef<number>(0);
+  const seenOfferIdsRef = useRef<Set<string>>(new Set());
 
   const topCard = deck[0] ?? null;
   const activeChatMatch = matches.find((m) => m.id === activeChatMatchId) ?? null;
@@ -204,6 +205,52 @@ export function useVicinoState(currentUserId: string | null) {
         response: row.response
       }))
     }));
+
+    for (const row of rows) {
+      const state = await getAvailabilityState(row.sessionId).catch(() => null);
+      const offer = state?.latestOffer ?? null;
+      if (!offer) {
+        continue;
+      }
+      const isRecipient = offer.recipientUserId === currentUserId;
+      const shouldSurface = offer.status === "pending" || offer.status === "accepted";
+      if (!isRecipient || !shouldSurface || seenOfferIdsRef.current.has(offer.id)) {
+        continue;
+      }
+      seenOfferIdsRef.current.add(offer.id);
+
+      const mapsUrl = `https://maps.apple.com/?q=${encodeURIComponent(offer.placeLabel)}`;
+      const systemBody =
+        offer.status === "accepted"
+          ? `Meetup confirmed at ${offer.placeLabel}\n${mapsUrl}`
+          : `${row.initiatorFirstName} sent a meetup location: ${offer.placeLabel}\n${mapsUrl}`;
+
+      setMatches((prev) =>
+        prev.map((match) => {
+          if (match.id !== row.matchId) {
+            return match;
+          }
+          if (match.chat.some((msg) => msg.id === `offer-${offer.id}`)) {
+            return match;
+          }
+          return {
+            ...match,
+            chat: [
+              ...match.chat,
+              {
+                id: `offer-${offer.id}`,
+                sender: "them",
+                body: systemBody,
+                createdAt: offer.createdAt
+              }
+            ]
+          };
+        })
+      );
+
+      setTab("messages");
+      openChat(row.matchId);
+    }
   };
 
   const refreshAll = async () => {
@@ -634,6 +681,10 @@ export function useVicinoState(currentUserId: string | null) {
     if (!currentUserId) {
       return;
     }
+    setOutTonight((prev) => ({
+      ...prev,
+      incomingRequests: prev.incomingRequests.filter((request) => request.sessionId !== sessionId)
+    }));
     await postAvailabilityRespondInterest(sessionId, currentUserId, response).catch(() => null);
     await refreshIncomingAvailability().catch(() => null);
     if (outTonight.sessionId === sessionId) {
